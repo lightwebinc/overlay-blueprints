@@ -1,0 +1,32 @@
+# Development only. The password below is a throwaway and is meant to be
+# visible: a deployed host reads its values from an EnvironmentFile on the
+# machine, so nothing here is ever the source of a real credential.
+services:
+  db:
+    image: mysql:9
+    environment:
+      MYSQL_ROOT_PASSWORD: overlay
+      MYSQL_DATABASE: overlay
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-poverlay"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    tmpfs:
+      - /var/lib/mysql
+
+  host:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      OVERLAY_TOPICS: tm_anytx
+      OVERLAY_KNEX_URL: mysql://root:overlay@db:3306/overlay
+      # Points at the bridge's header read API. There is no default for this
+      # anywhere in the host: a default would send verification questions to
+      # someone else's server.
+      OVERLAY_CHAIN_TRACKER_URL: ${OVERLAY_CHAIN_TRACKER_URL:?set this to your bridge header API}
+      OVERLAY_ADMIN_TOKEN: dev-token
+    ports:
+      - "8080:8080"

@@ -1,0 +1,56 @@
+overlay-blueprints
+Copyright 2026 Lightweb Inc. (https://lightweb.net)
+
+=========================================================================
+
+This software is a reference overlay services host: it assembles the
+released BSV overlay engine as a library, stores through that engine's own
+storage, and takes a multicast delivery fabric as its transport. Objects
+delivered by the fabric reach it as ordinary BRC-22 submissions from the
+bridge beside it, and its chain tracker is that bridge's block-header
+store, so every object it admits is verified against headers the host
+itself received. The engine is not modified and not forked, and the host's
+own propagation is switched off by holding no advertiser: the fabric is
+the propagation.
+
+This product includes software developed at Lightweb Inc. and licensed
+under the Apache License, Version 2.0 (see LICENSE).
+
+=========================================================================
+Third-Party Standards
+
+  BRC-22:  Overlay Network Data Synchronization
+  BRC-24:  Overlay Network Lookup Services
+  BRC-62:  Background Evaluation Extended Format (BEEF) Transactions
+  BSV Blockchain Standards Repository
+  https://github.com/bsv-blockchain/BRCs/
+
+  BRC-135: Multicast Block Header Frame Format
+  BRC-148: Multicast Shard Domain Partitioning and the BEEF Object Plane
+  BRC-149: Multicast BEEF Object Frame Format
+  https://github.com/lightwebinc/bsv-multicast/
+
+=========================================================================
+Third-Party Software
+
+This product includes third-party software, distributed under the terms
+of their respective licenses. Each dependency retains its own copyright;
+this notice does not modify those licenses.
+
+  @bsv/overlay                                Open BSV License Version 5
+  @bsv/sdk                                    Open BSV License Version 5
+  knex                                        MIT License
+  mysql2                                      MIT License
+
+© BSV Association,
+
+The attribution line above is reproduced verbatim as the Open BSV License
+Version 5 requires it, for the BSV Association packages listed. Two terms
+of that license are worth stating in plain words, because they do not
+match the permissive licenses beside them: the grant is made on a
+revocable basis, and the software it covers, together with anything
+derived from it, must only be used on the BSV Blockchains. Those terms
+bind this product's use of those dependencies. They do not extend to
+Lightweb Inc.'s own source, which is Apache-2.0 as stated above.
+
+=========================================================================

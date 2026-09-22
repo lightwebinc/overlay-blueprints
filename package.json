@@ -1,0 +1,30 @@
+{
+  "name": "@lightwebinc/overlay-blueprints",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A reference overlay host on the released BSV overlay engine, with the BEEF object plane as its transport",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "bin": {
+    "overlay-host": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "test": "node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@bsv/overlay": "2.3.1",
+    "@bsv/sdk": "2.7.1",
+    "knex": "3.3.0",
+    "mysql2": "3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}
