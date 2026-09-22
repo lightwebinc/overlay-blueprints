@@ -8,7 +8,7 @@ be false the first time a real engine answered.
 
 ## Unit
 
-`npm test`, 7 tests, all passing:
+`npm test`, 10 tests, all passing:
 
 - `parseTopics` accepts both wire forms of `x-topics`, and refuses a list with
   an empty name rather than filtering it. Filtering loses a topic in silence,
@@ -19,6 +19,10 @@ be false the first time a real engine answered.
   evicted one.
 - `tm_anytx` refuses rather than throws on an object it cannot parse. A throw
   from a topic manager is not a rejection, it is a 500.
+- `ls_anytx` rebuilds its index from the engine's own storage at startup and
+  skips spent outputs, so a restart does not read as two hosts disagreeing.
+- `parseSyncPeers` refuses a malformed peer list rather than filtering it, and
+  a topic with no peers is `false`, which the engine skips outright.
 - The metrics registry presets its series at zero, so an alert can match a
   counter that has not fired yet. An absent series matches nothing.
 
@@ -42,7 +46,7 @@ propagation is off`, `listening ready=true`.
 | `POST /lookup` unknown service | 400 |
 | `POST /admin/startGASPSync`, no token | 401 |
 | the same, wrong token | 401 |
-| the same, right token | 200, and `overlay_host_gasp_syncs_total{result="ok"}` moved to 1 |
+| the same, right token | 200, and the counter moved |
 
 ### Five distinct objects
 
@@ -90,6 +94,49 @@ opens, skipping spent outputs, and logs what it restored. Verified by restart:
 `lookup index restored from storage outputs=6`, and the oracle answered six.
 There is a unit test, and the fix recovered the object the pre-fix restart had
 already dropped.
+
+### What that admin run did NOT prove, corrected
+
+The run above was first recorded as proving the authenticated catch-up
+trigger. It proves the bearer check and nothing else, and the counter that
+looked like evidence was the evidence of the mistake.
+
+Every topic's sync configuration was `false`, and the engine's `startGASPSync`
+does `if (configuredEndpoints === false) continue`. So it iterated, skipped
+everything, and returned. The route answered 200 and the success counter moved
+because a no-op produces both.
+
+Read against source this looked right, because the comment in this repository
+said `false` meant "no background sync, admin sync still available". It does
+not. It means the topic is skipped on every trigger, including that one.
+
+What changed as a result: catch-up peers are now named explicitly in
+`OVERLAY_SYNC_PEERS`, a host with none says so at startup, and the route
+answers `{"status":"no-peers"}` with its own counter label instead of
+reporting success. A real catch-up between two hosts is still owed, and it
+needs the second host, which is the lab phase.
+
+### Re-run after the corrections
+
+Everything above was re-run against the corrected host, on MySQL, and the
+counters now distinguish what the old ones conflated.
+
+| Exercise | Result |
+| --- | --- |
+| three distinct objects, then a fourth submit repeating the first | `overlay_host_topic_submits_total{topic="tm_anytx"} 4` and `overlay_host_admissions_total{topic="tm_anytx"} 3`. The duplicate admitted nothing and is no longer counted as an admission |
+| `POST /admin/startGASPSync`, right token, no peers configured | 200 `{"status":"no-peers","topicsWithPeers":0}`, and `overlay_host_gasp_syncs_total{result="no-peers"}` moved. `result="ok"` stayed at 0 |
+| startup with no peers | logged `no catch-up peers configured: /admin/startGASPSync will be a no-op` |
+| a 100 KB `POST /lookup` body | 413 with `overlay_host_lookups_total{result="malformed"}`. It used to escape the handler, because only `/submit` caught the size throw |
+| the parity oracle over the same host | three sorted outpoints, and every merkle proof `VERIFIED` against an independent header service |
+
+### Tools referred to here
+
+`overlayverify` and `txmint overlay` are not in this repository and are not
+public. They are internal tools: a Go parity oracle that reads a host's
+`/lookup` answer and verifies every merkle proof against an independent header
+service, and a generator that produces funded BEEF objects. They are named
+because the evidence above came from them, not as something a reader can run.
+Everything under **Unit** above runs from this repository alone.
 
 This is the whole documented surface. What it does not cover is a second host
 and a real delivery between them, which is the phase that follows and needs

@@ -37,7 +37,7 @@ what belongs in its topic. The blueprint applications are separate.
 | --- | --- |
 | `POST /submit` | BRC-22, at the ROOT, octet-stream body, `x-topics` in either wire form. Answers a bare STEAK |
 | `POST /lookup` | BRC-24 |
-| `POST /admin/startGASPSync` | catch-up on demand, behind a bearer token |
+| `POST /admin/startGASPSync` | catch-up from explicitly configured peers, behind a bearer token. A no-op, reported as such, on a host with no peers configured |
 | `GET /healthz` `GET /readyz` | liveness, and readiness gated on storage and the chain tracker |
 | `GET /metrics` | Prometheus text. The engine exposes none, so everything here is counted by the host |
 
@@ -45,6 +45,12 @@ what belongs in its topic. The blueprint applications are separate.
 
 Entirely from the environment; see [docs/configuration.md](docs/configuration.md).
 Secrets arrive through an `EnvironmentFile=` on the host, never from a repository.
+
+Catch-up peers, if any, are named explicitly in `OVERLAY_SYNC_PEERS`. The
+engine would also accept `SHIP`, which resolves peers through the public
+discovery overlays; this host does not offer it, because reaching those to
+find a peer is the outbound behaviour the no-advertiser posture exists to
+remove.
 
 ## Licence
 

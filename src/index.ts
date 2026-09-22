@@ -47,8 +47,17 @@ async function main(): Promise<void> {
     storage,
     chainTracker,
     topics: cfg.topics,
+    syncPeers: cfg.syncPeers,
   })
-  log('engine built with no advertiser: propagation is off')
+  const peered = Object.values(cfg.syncPeers).filter((u) => u.length > 0).length
+  log('engine built with no advertiser: propagation is off', {
+    topicsWithCatchupPeers: peered,
+  })
+  if (peered === 0) {
+    // Said out loud at startup, because the consequence is a silent one: the
+    // admin catch-up route will return success having done nothing.
+    log('no catch-up peers configured: /admin/startGASPSync will be a no-op')
+  }
 
   // Rebuild the lookup index from storage BEFORE the port opens. The engine
   // holds admitted outputs durably but does not replay past admissions into a
@@ -89,6 +98,7 @@ async function main(): Promise<void> {
     metrics,
     adminToken: cfg.adminToken,
     topics: cfg.topics,
+    syncPeers: cfg.syncPeers,
     ready,
     log,
   })

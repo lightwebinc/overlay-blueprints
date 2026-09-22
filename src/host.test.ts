@@ -1,11 +1,19 @@
 /**
- * Integration tests: the real engine, the real storage layer, this host's own
- * HTTP surface. They run against SQLite rather than MySQL because what is
- * under test is this host's wiring and its contracts, not the database, and a
- * test that needs a server is a test that does not get run.
+ * Unit tests: the parts that can be decided without a database.
+ *
+ * Header parsing, the startup assertions, the lookup index's own behaviour
+ * including its restore path, the topic manager's refusal contract, the sync
+ * peer parser and metric presetting. No engine is constructed here, no storage
+ * is opened and no HTTP server is built.
+ *
+ * The engine, the storage layer and the HTTP surface are exercised LIVE
+ * against MySQL and recorded in docs/proof.md. That split is deliberate: what
+ * those need is a real database and a real chain tracker, and a test that
+ * faked either would prove the fake.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { parseSyncPeers, ConfigError } from './config.js'
 import { parseTopics } from './http.js'
 import { assertReady, assertNoAdvertiser, AssertionError } from './engine.js'
 import { AnyTxLookupService } from './lookup/anytx.js'
@@ -57,7 +65,12 @@ test('startup assertions fail fast on the three silent misconfigurations', () =>
     AssertionError,
     'a topic with no manager must be refused',
   )
-  assert.throws(() => assertNoAdvertiser({}), AssertionError)
+  // assertNoAdvertiser now reads the PARTS object rather than a named field,
+  // because EngineParts has no advertiser field and adding one to make the
+  // check reachable would create the hole it closes.
+  assert.throws(() => assertNoAdvertiser({ advertiser: {} }), AssertionError)
+  assert.doesNotThrow(() => assertNoAdvertiser({}))
+  assert.doesNotThrow(() => assertNoAdvertiser({ advertiser: undefined }))
   assert.doesNotThrow(() => assertNoAdvertiser(undefined))
 })
 
@@ -135,4 +148,50 @@ test('metrics preset a series at zero so an alert can match it', () => {
   assert.match(m.render(), /overlay_host_submits_total\{result="ok"\} 0/)
   m.inc('overlay_host_submits_total', { result: 'ok' })
   assert.match(m.render(), /overlay_host_submits_total\{result="ok"\} 1/)
+})
+
+// A peer list that silently dropped a malformed entry would leave a host
+// syncing with fewer peers than its operator configured, and the only symptom
+// would be data that never arrives.
+test('parseSyncPeers refuses rather than filters', () => {
+  assert.deepEqual(parseSyncPeers('', ['tm_a']), {})
+  assert.deepEqual(parseSyncPeers('tm_a=https://one.example/;tm_b=http://two.example/', ['tm_a', 'tm_b']), {
+    tm_a: ['https://one.example/'],
+    tm_b: ['http://two.example/'],
+  })
+  assert.deepEqual(parseSyncPeers('tm_a=https://one.example/,https://two.example/', ['tm_a']), {
+    tm_a: ['https://one.example/', 'https://two.example/'],
+  })
+
+  for (const bad of [
+    'tm_a', // no =
+    '=https://one.example/', // no topic
+    'tm_zzz=https://one.example/', // a topic this host does not mount
+    'tm_a=https://one.example/;tm_a=https://two.example/', // named twice
+    'tm_a=', // empty peer
+    'tm_a=not a url',
+    'tm_a=ftp://one.example/', // not http or https
+  ]) {
+    assert.throws(() => parseSyncPeers(bad, ['tm_a']), ConfigError, `accepted ${JSON.stringify(bad)}`)
+  }
+})
+
+// The defect this whole change set turns on: `false` does not mean "no
+// background sync, admin sync still available". It means the engine skips the
+// topic entirely, on every trigger including the admin one.
+test('a topic with no configured peers is false, which the engine skips outright', () => {
+  const managers = { tm_a: new AnyTxTopicManager() }
+  const parts = {
+    managers,
+    lookupServices: { ls_anytx: new AnyTxLookupService() },
+    storage: {} as never,
+    chainTracker: {} as never,
+    topics: ['tm_a'],
+  }
+  // No syncPeers at all.
+  assert.doesNotThrow(() => assertReady(parts))
+
+  // And an advertiser arriving through a widened type is refused, although
+  // EngineParts has no such field today.
+  assert.throws(() => assertReady({ ...parts, advertiser: {} } as never), AssertionError)
 })

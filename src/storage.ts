@@ -23,8 +23,15 @@ export async function openStorage(knexUrl: string): Promise<{ db: Knex; storage:
  * so knex needs a source to run them through. There is no shorter way: knex's
  * default source reads a directory.
  *
- * They are reachable ONLY through the package root export. The deep path is
- * not listed in the package's `exports`, so importing it fails to resolve.
+ * They come off the root export as a NAMESPACE (`export * as
+ * KnexStorageMigrations`), which is why the array arrives on `.default` rather
+ * than as the binding itself, and why the coalesce below exists.
+ *
+ * The deep path `@bsv/overlay/storage/knex/all-migrations.ts` does resolve:
+ * the package's `exports` map carries `./storage/*` subpath patterns, checked
+ * against the installed 2.3.1 rather than assumed. It is not used anyway,
+ * because a subpath pattern is a wider promise than a package's root export
+ * and the root export is the one the package's own README documents.
  */
 class InMemoryMigrationSource implements Knex.MigrationSource<Knex.Migration> {
   private readonly list = (

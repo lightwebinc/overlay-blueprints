@@ -7,18 +7,38 @@ export interface HttpDeps {
   readonly metrics: Metrics
   readonly adminToken: string
   readonly topics: readonly string[]
+  /** Explicit catch-up peers per topic, so the admin route can say whether it had any. */
+  readonly syncPeers: Readonly<Record<string, readonly string[]>>
   readonly ready: () => boolean
   readonly log: (msg: string, extra?: Record<string, unknown>) => void
 }
 
 const MAX_BODY = 64 * 1024 * 1024 // matches the bridge's object ceiling
+// A BRC-24 question is a small JSON object. This is generous for one and still
+// three orders of magnitude below the object limit.
+const MAX_QUESTION = 64 * 1024
 
-async function readBody(req: IncomingMessage): Promise<Buffer> {
+/**
+ * A body that exceeded its limit, as a distinct type.
+ *
+ * It was a bare Error, caught by the submit route's blanket catch and turned
+ * into a 413. On /lookup the same throw escaped the handler entirely, so the
+ * two routes answered differently to the same condition. A sentinel makes the
+ * size case answerable everywhere without a blanket catch turning every other
+ * read failure into a 413 as well.
+ */
+export class BodyTooLarge extends Error {
+  constructor(readonly limit: number) {
+    super(`body exceeds ${limit} bytes`)
+  }
+}
+
+async function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const c of req) {
     total += (c as Buffer).length
-    if (total > MAX_BODY) throw new Error('body too large')
+    if (total > limit) throw new BodyTooLarge(limit)
     chunks.push(c as Buffer)
   }
   return Buffer.concat(chunks)
@@ -57,7 +77,13 @@ export function buildServer(d: HttpDeps): Server {
   d.metrics.preset('overlay_host_submits_total', { result: 'ok' })
   d.metrics.preset('overlay_host_submits_total', { result: 'malformed' })
   d.metrics.preset('overlay_host_submits_total', { result: 'error' })
+  d.metrics.preset('overlay_host_lookups_total', { result: 'ok' })
+  d.metrics.preset('overlay_host_lookups_total', { result: 'malformed' })
+  d.metrics.preset('overlay_host_lookups_total', { result: 'error' })
   d.metrics.preset('overlay_host_gasp_syncs_total', { result: 'ok' })
+  // Preset too, because it is the value a correctly configured host never
+  // emits and therefore the one an alert most needs to be able to match.
+  d.metrics.preset('overlay_host_gasp_syncs_total', { result: 'no-peers' })
   d.metrics.preset('overlay_host_gasp_syncs_total', { result: 'error' })
 
   return createServer((req, res) => {
@@ -112,10 +138,14 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
     }
     let body: Buffer
     try {
-      body = await readBody(req)
-    } catch {
+      body = await readBody(req, MAX_BODY)
+    } catch (err) {
       d.metrics.inc('overlay_host_submits_total', { result: 'malformed' })
-      json(res, 413, { error: 'body too large' })
+      if (err instanceof BodyTooLarge) {
+        json(res, 413, { error: err.message })
+      } else {
+        json(res, 400, { error: 'could not read the request body' })
+      }
       return
     }
     if (body.length === 0) {
@@ -126,7 +156,15 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
     try {
       const steak = await d.engine.submit({ beef: [...body], topics }, undefined, 'current-tx')
       d.metrics.inc('overlay_host_submits_total', { result: 'ok' })
-      for (const t of topics) d.metrics.inc('overlay_host_admissions_total', { topic: t })
+      // Two different facts, and they were one counter named for the wrong
+      // one. A submit of an object the host already holds returns 200 and
+      // admits NOTHING, so a counter incremented per requested topic on every
+      // 200 and called "admissions" reports admissions that did not happen.
+      for (const t of topics) d.metrics.inc('overlay_host_topic_submits_total', { topic: t })
+      for (const [t, adm] of Object.entries(steak ?? {})) {
+        const n = adm?.outputsToAdmit?.length ?? 0
+        if (n > 0) d.metrics.inc('overlay_host_admissions_total', { topic: t }, n)
+      }
       // Answer the BARE map, as the released TypeScript engine does. A client
       // that worked against that engine keeps working here.
       json(res, 200, steak)
@@ -140,21 +178,42 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
 
   // ---- BRC-24 lookup
   if (req.method === 'POST' && path === '/lookup') {
-    const body = await readBody(req)
+    let body: Buffer
+    try {
+      // A question is small. Giving it the submit route's object-sized limit
+      // would let anyone hold this host's memory open with a body that was
+      // never going to be a valid question.
+      body = await readBody(req, MAX_QUESTION)
+    } catch (err) {
+      d.metrics.inc('overlay_host_lookups_total', { result: 'malformed' })
+      if (err instanceof BodyTooLarge) {
+        json(res, 413, { error: err.message })
+      } else {
+        json(res, 400, { error: 'could not read the request body' })
+      }
+      return
+    }
     try {
       const question = JSON.parse(body.toString('utf8')) as { service: string; query: unknown }
       const answer = await d.engine.lookup(question)
+      d.metrics.inc('overlay_host_lookups_total', { result: 'ok' })
       json(res, 200, answer)
     } catch (err) {
+      d.metrics.inc('overlay_host_lookups_total', { result: 'error' })
       json(res, 400, { error: String((err as Error).message) })
     }
     return
   }
 
-  // ---- Admin. One authenticated trigger, so the drills that exercise
-  // catch-up run identically here and on a stock server, which offers the
-  // same route. Without it this host's backfill path could only ever be
-  // exercised by its own startup and would go into the drills unproven.
+  // ---- Admin. One authenticated trigger, present so a client or drill
+  // written against a stock server finds the same route here.
+  //
+  // What it actually does depends entirely on configuration, and the failure
+  // mode is silence: the engine skips every topic whose sync configuration is
+  // `false`, so on a host with no peers configured this route returns 200
+  // having done nothing. It is reported as `result="no-peers"` rather than
+  // `"ok"` for that reason. A 200 and a success counter were once taken as
+  // proof that catch-up worked; they prove the bearer check works.
   if (path.startsWith('/admin/')) {
     const auth = req.headers.authorization
     const expected = `Bearer ${d.adminToken}`
@@ -166,10 +225,12 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
       return
     }
     if (req.method === 'POST' && path === '/admin/startGASPSync') {
+      const configured = Object.values(d.syncPeers).filter((u) => u.length > 0).length
       try {
         await d.engine.startGASPSync()
-        d.metrics.inc('overlay_host_gasp_syncs_total', { result: 'ok' })
-        json(res, 200, { status: 'ok' })
+        const result = configured === 0 ? 'no-peers' : 'ok'
+        d.metrics.inc('overlay_host_gasp_syncs_total', { result })
+        json(res, 200, { status: result, topicsWithPeers: configured })
       } catch (err) {
         d.metrics.inc('overlay_host_gasp_syncs_total', { result: 'error' })
         d.log('GASP sync failed', { err: String(err) })

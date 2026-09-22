@@ -17,6 +17,12 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /src/dist ./dist
 
+# The licences travel with the image, not only with the source tree. Two of the
+# dependencies are licensed on terms that require their own text to be included
+# in any copy or substantial portion of the software, and an image is exactly
+# that. node_modules happens to carry each package's own file; these are ours.
+COPY LICENSE NOTICE LICENSE-THIRD-PARTY /usr/share/doc/overlay-blueprints/
+
 # Unprivileged. The image ships no configuration: every value arrives from the
 # environment, and the secrets among them from an EnvironmentFile on the host.
 USER node

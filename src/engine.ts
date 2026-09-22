@@ -9,6 +9,11 @@ export interface EngineParts {
   readonly storage: Storage
   readonly chainTracker: ChainTracker
   readonly topics: readonly string[]
+  /**
+   * Explicit catch-up peers per topic. A topic absent here is configured
+   * `false` and the engine skips it in `startGASPSync`.
+   */
+  readonly syncPeers?: Readonly<Record<string, readonly string[]>>
 }
 
 /**
@@ -29,12 +34,23 @@ export interface EngineParts {
  */
 export function buildEngine(p: EngineParts): Engine {
   assertReady(p)
-  const syncConfiguration: Record<string, false> = {}
+  // Per topic: a list of explicit peer URLs, or `false`.
+  //
+  // `false` does NOT mean "no background sync, admin sync still available". It
+  // means the engine SKIPS the topic entirely: `startGASPSync` reads the value
+  // and does `if (configuredEndpoints === false) continue`, and that is the
+  // same code path the admin route drives. A host with every topic `false` has
+  // an admin trigger that returns success having done nothing, silently. This
+  // was measured, not reasoned about: the route was recorded as "proven" on
+  // the strength of a 200 and a counter, both of which a no-op produces.
+  //
+  // The third value the engine accepts, the string 'SHIP', is deliberately not
+  // offered: it resolves peers through the public discovery overlays, which is
+  // exactly the outbound behaviour a host with no advertiser exists to avoid.
+  const syncConfiguration: Record<string, false | string[]> = {}
   for (const t of p.topics) {
-    // false = do not sync this topic with anyone. Catch-up is triggered
-    // deliberately through the admin surface, never as a background habit
-    // that would quietly reach the public discovery overlays.
-    syncConfiguration[t] = false
+    const peers = p.syncPeers?.[t]
+    syncConfiguration[t] = peers !== undefined && peers.length > 0 ? [...peers] : false
   }
   return new Engine(
     p.managers,
@@ -77,14 +93,25 @@ export function assertReady(p: EngineParts): void {
       throw new AssertionError(`topic manager ${name} is mounted but not configured`)
     }
   }
+  assertNoAdvertiser(p)
 }
 
 /**
- * Refuse an advertiser. The posture is a property of this host, so a caller
- * that passes one has misunderstood what it is for, and finding that out at
- * startup is much cheaper than finding it in a propagation capture.
+ * Refuse an advertiser.
+ *
+ * `EngineParts` has no advertiser field, so today this cannot fire: passing
+ * one is a type error. That is the point, and it is also why this is called
+ * from `assertReady` on the raw object rather than on a named field. Adding
+ * the field to make the check reachable would create the very hole the design
+ * closes. Someone extending `EngineParts` later, though, will add fields
+ * without reading this file, and an advertiser that arrives by a widened type
+ * or an untyped spread has no symptom: the host keeps working and quietly
+ * starts propagating, which is visible only in a traffic capture nobody is
+ * taking.
  */
-export function assertNoAdvertiser(advertiser: unknown): void {
+export function assertNoAdvertiser(parts: unknown): void {
+  if (typeof parts !== 'object' || parts === null) return
+  const advertiser = (parts as Record<string, unknown>)['advertiser']
   if (advertiser !== undefined && advertiser !== null) {
     throw new AssertionError(
       'an advertiser is configured: this host runs with none, because the plane is the propagation',
