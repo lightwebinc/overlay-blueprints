@@ -44,6 +44,53 @@ propagation is off`, `listening ready=true`.
 | the same, wrong token | 401 |
 | the same, right token | 200, and `overlay_host_gasp_syncs_total{result="ok"}` moved to 1 |
 
+### Five distinct objects
+
+The first run above admitted one object, which proves the route but not the
+index: an engine that admitted everything into one slot would look identical.
+So five objects were built, each a transaction whose only output carries a
+different nonce, each with its own merkle path at its own height, and each
+verified by the host against a header service holding the matching roots.
+
+| Exercise | Result |
+| --- | --- |
+| five submits, one object each | 200 each, `outputsToAdmit:[0]` each. Five distinct admissions, not one repeated |
+| `overlayverify ids` | five sorted `txid.vout` lines, derived from each object's own bytes |
+| `overlayverify beef` over the same host | `VERIFIED`, five objects, every BUMP recomputed against an independent header service |
+
+Two things this run settled that no amount of reading would have:
+
+- **The chain tracker is genuinely in the path.** The first attempt was refused
+  with `Invalid merkle path`, not because the root was wrong but because the
+  objects sat at path index 0, which the SDK treats as the coinbase and refuses
+  until the block is 100 deep. Moving them to index 1, with a sibling at 0,
+  admitted them. A host that was not really consulting its chain tracker would
+  have admitted the first attempt.
+- **Roots are compared as display hex**, the same byte order the object's own
+  computed root prints in. The little-endian form was tried first and every
+  submission was refused.
+
+Honest limit: these objects are locally minted. Their transactions are real and
+distinct and their merkle paths verify against the header service the host was
+given, but nothing mined them, so this proves the host's admission, indexing
+and verification wiring and not provenance. Chain-funded objects are
+`txmint overlay`'s work.
+
+### A defect this run found
+
+A restart between the two runs above came back with an **empty** lookup answer
+while the engine still held every output. The engine does not replay past
+admissions into a lookup service on start, and the index is in memory, so a
+restarted host answered an authoritative empty set. Two hosts that agreed
+before a restart would have been read as disagreeing after one, which is
+exactly the false reading a parity oracle exists to prevent.
+
+Fixed: the host rebuilds the index from `findUTXOsForTopic` before the port
+opens, skipping spent outputs, and logs what it restored. Verified by restart:
+`lookup index restored from storage outputs=6`, and the oracle answered six.
+There is a unit test, and the fix recovered the object the pre-fix restart had
+already dropped.
+
 This is the whole documented surface. What it does not cover is a second host
 and a real delivery between them, which is the phase that follows and needs
 the lab.

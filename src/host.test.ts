@@ -101,6 +101,27 @@ test('ls_anytx forgets a spent and an evicted output', async () => {
   assert.equal(ls.size, 0, 'an evicted output must not appear in any later answer')
 })
 
+// Found by restarting a host that had admitted five objects: the engine does
+// not replay admissions into a lookup service on start, so the index came back
+// empty while the engine still held every output. A parity oracle would have
+// read that as the two hosts disagreeing.
+test('ls_anytx rebuilds its index from storage, skipping spent outputs', async () => {
+  const ls = new AnyTxLookupService()
+  const restored = ls.restore([
+    { txid: 'aa'.repeat(32), outputIndex: 0, topic: 'tm_anytx', spent: false },
+    { txid: 'bb'.repeat(32), outputIndex: 2, topic: 'tm_anytx', spent: false },
+    { txid: 'cc'.repeat(32), outputIndex: 0, topic: 'tm_anytx', spent: true },
+  ])
+  assert.equal(restored, 2)
+  assert.equal(ls.size, 2)
+
+  const all = await ls.lookup({ service: 'ls_anytx', query: { all: true } })
+  assert.deepEqual(all, [
+    { txid: 'aa'.repeat(32), outputIndex: 0 },
+    { txid: 'bb'.repeat(32), outputIndex: 2 },
+  ])
+})
+
 test('tm_anytx refuses rather than throws on an object it cannot parse', async () => {
   const tm = new AnyTxTopicManager()
   const out = await tm.identifyAdmissibleOutputs([1, 2, 3], [])

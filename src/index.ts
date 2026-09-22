@@ -50,6 +50,17 @@ async function main(): Promise<void> {
   })
   log('engine built with no advertiser: propagation is off')
 
+  // Rebuild the lookup index from storage BEFORE the port opens. The engine
+  // holds admitted outputs durably but does not replay past admissions into a
+  // lookup service on start, so without this a restarted host answers an
+  // authoritative empty set while still holding every output, and a parity
+  // oracle reads an ordinary restart as two hosts disagreeing.
+  let restored = 0
+  for (const t of cfg.topics) {
+    restored += index.restore(await storage.findUTXOsForTopic(t))
+  }
+  log('lookup index restored from storage', { outputs: restored })
+
   // Readiness: storage answers and the chain tracker answers. Both are
   // re-checked rather than cached, because a host that came up healthy and
   // lost its chain tracker is not ready and should say so.

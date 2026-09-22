@@ -16,6 +16,15 @@ import type { LookupQuestion } from '@bsv/sdk'
  * second durable store would be a second thing for two hosts to disagree
  * about.
  *
+ * That choice has a consequence that has to be paid for rather than assumed
+ * away, and it was found by restarting a host that had admitted five objects:
+ * the engine does NOT replay past admissions into a lookup service on start,
+ * so the index came back empty while the engine still held every output. The
+ * host answered an authoritative empty set, and a parity oracle comparing it
+ * with its unrestarted sibling would have read an ordinary restart as the two
+ * hosts disagreeing. `restore` is the answer: the host rebuilds the index from
+ * the engine's own storage before it reports itself ready.
+ *
  * A lookup service answers with a FORMULA, a list of outpoints the engine then
  * hydrates from its own storage, not with documents of its own. So this
  * service never holds object bytes, and two hosts comparing answers are
@@ -50,6 +59,24 @@ export class AnyTxLookupService implements LookupService {
     const outputIndex = Number(outpoint.slice(at + 1))
     if (!Number.isInteger(outputIndex) || outputIndex < 0) return undefined
     return { txid, outputIndex }
+  }
+
+  /**
+   * Rebuild the index from outputs the engine's storage already holds.
+   *
+   * Called once per topic at startup, before the port opens. Unspent outputs
+   * only: a spent one was removed from the index when it was spent, and
+   * putting it back would make a restarted host answer with more than its
+   * sibling rather than less.
+   */
+  restore(outputs: Array<{ txid: string; outputIndex: number; topic: string; spent: boolean }>): number {
+    let restored = 0
+    for (const o of outputs) {
+      if (o.spent) continue
+      this.admitted.set(AnyTxLookupService.key(o.txid, o.outputIndex), o.topic)
+      restored++
+    }
+    return restored
   }
 
   outputAdmittedByTopic(payload: OutputAdmittedByTopic): void {
