@@ -1,4 +1,4 @@
-.PHONY: build check test clean image
+.PHONY: build check test clean image licences licences-update
 
 build:
 	npm ci && npm run build
@@ -14,3 +14,9 @@ image:
 
 clean:
 	rm -rf dist
+
+licences:
+	python3 scripts/gen-third-party-licenses.py . --check
+
+licences-update:
+	python3 scripts/gen-third-party-licenses.py .

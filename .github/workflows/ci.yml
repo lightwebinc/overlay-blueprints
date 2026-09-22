@@ -35,3 +35,9 @@ jobs:
         run: npm run build
       - name: test
         run: npm test
+      # LICENSE-THIRD-PARTY is generated from the production dependency tree,
+      # so a new package that nobody notices is a licence obligation that
+      # nobody notices. This fails the build instead. It runs after npm ci,
+      # because it reads node_modules.
+      - name: third-party licences are current
+        run: python3 scripts/gen-third-party-licenses.py . --check
