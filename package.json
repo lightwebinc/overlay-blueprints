@@ -16,10 +16,10 @@
     "test": "node --test \"dist/**/*.test.js\""
   },
   "dependencies": {
-    "@bsv/overlay": "2.3.1",
     "@bsv/sdk": "2.7.1",
     "knex": "3.3.0",
-    "mysql2": "3.24.4"
+    "mysql2": "3.24.4",
+    "@lightwebinc/overlay": "file:vendor/overlay-fork/lightwebinc-overlay-2.3.1.tgz"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

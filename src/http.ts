@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import type { Engine } from '@bsv/overlay'
+import type { Engine } from '@lightwebinc/overlay'
 import type { Metrics } from './metrics.js'
 
 export interface HttpDeps {

@@ -1,4 +1,4 @@
-import { Engine, type TopicManager, type LookupService, type Storage } from '@bsv/overlay'
+import { Engine, type TopicManager, type LookupService, type Storage } from '@lightwebinc/overlay'
 import type { ChainTracker } from '@bsv/sdk'
 
 export class AssertionError extends Error {}

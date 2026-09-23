@@ -18,7 +18,7 @@ import { AnyTxLookupService } from './lookup/anytx.js'
 import { Metrics } from './metrics.js'
 import { installedVersions } from './buildinfo.js'
 import { buildServer } from './http.js'
-import type { TopicManager, LookupService } from '@bsv/overlay'
+import type { TopicManager, LookupService } from '@lightwebinc/overlay'
 
 function log(msg: string, extra: Record<string, unknown> = {}): void {
   const parts = Object.entries(extra).map(([k, v]) => `${k}=${String(v)}`)
@@ -94,6 +94,27 @@ async function main(): Promise<void> {
   probeTimer.unref()
 
   const metrics = new Metrics()
+  // The reason this host runs a forked engine.
+  //
+  // Upstream's `submit` catches every per-topic validation error into a local
+  // set and still returns an EMPTY admittance instruction for that topic, with
+  // HTTP 200. A failure, a duplicate and a legitimate empty admission are then
+  // byte-identical to us, so a host admitting nothing reads exactly like a
+  // quiet plane and the only available alert is a long absence-of-admissions
+  // conjunction. With the fork's reporter a single failed admission is a
+  // counter, and therefore alertable on the first occurrence.
+  //
+  // The topic is a label; the error is NOT. An error string is unbounded,
+  // attacker-influenced through the object it came from, and would make this
+  // series a cardinality bomb. It goes to the log, where it belongs.
+  for (const t of cfg.topics) {
+    metrics.preset('overlay_host_topic_failures_total', { topic: t })
+  }
+  engine.onTopicFailed = (topic, error) => {
+    metrics.inc('overlay_host_topic_failures_total', { topic })
+    log('topic admission FAILED', { topic, err: String(error) })
+  }
+
   metrics.info('overlay_host_build_info', installedVersions())
   metrics.gauge('overlay_host_indexed_outputs', () => index.size)
   metrics.gauge('overlay_host_ready', () => (lastReady ? 1 : 0))

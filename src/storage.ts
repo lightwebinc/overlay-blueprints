@@ -1,5 +1,5 @@
 import knexLib, { type Knex } from 'knex'
-import { KnexStorage, KnexStorageMigrations } from '@bsv/overlay'
+import { KnexStorage, KnexStorageMigrations } from '@lightwebinc/overlay'
 
 /**
  * Storage is the engine's own `KnexStorage` on MySQL. No storage backend is

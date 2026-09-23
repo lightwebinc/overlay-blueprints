@@ -42,8 +42,14 @@ export function installedVersions(): Record<string, string> {
       return 'unknown'
     }
   }
+  // The PACKAGE NAME is reported, not just the version. The fork keeps
+  // upstream's version number so it says plainly which release it tracks,
+  // which means the version alone cannot tell an operator whether a host is on
+  // the fork or on upstream - and that is exactly the question this metric
+  // exists to answer.
   return {
-    overlay: read('@bsv/overlay'),
+    overlay_pkg: '@lightwebinc/overlay',
+    overlay: read('@lightwebinc/overlay'),
     sdk: read('@bsv/sdk'),
     gasp: read('@bsv/gasp'),
     node: process.versions.node,

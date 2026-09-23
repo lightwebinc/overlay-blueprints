@@ -1,4 +1,4 @@
-import type { TopicManager, AdmittanceInstructions } from '@bsv/overlay'
+import type { TopicManager, AdmittanceInstructions } from '@lightwebinc/overlay'
 import { Transaction } from '@bsv/sdk'
 
 /**

@@ -3,8 +3,8 @@ import type {
   OutputAdmittedByTopic,
   OutputSpent,
   LookupServiceMetaData,
-} from '@bsv/overlay'
-import type { LookupFormula } from '@bsv/overlay'
+} from '@lightwebinc/overlay'
+import type { LookupFormula } from '@lightwebinc/overlay'
 import type { LookupQuestion } from '@bsv/sdk'
 
 /**

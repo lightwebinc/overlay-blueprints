@@ -1,0 +1,65 @@
+--- a/src/Engine.ts
++++ b/src/Engine.ts
+@@ -114,8 +114,44 @@
+ /**
+  * An engine for running BSV Overlay Services (topic managers and lookup services).
+  */
++/**
++ * Reports a per-topic validation failure during `submit`.
++ *
++ * WHY THIS EXISTS. `submit` catches every per-topic error into a local
++ * `failedTopics` Set and still returns `{outputsToAdmit: [], coinsToRetain: []}`
++ * for that topic, with HTTP 200. A topic that FAILED, a topic that was a
++ * DUPLICATE and a topic that legitimately admitted nothing are byte-identical
++ * to every caller, so a host admitting nothing is indistinguishable from a
++ * quiet plane. An operator can only infer it from a sustained absence, which
++ * means an outage is detectable in tens of minutes rather than on the first
++ * failure.
++ *
++ * It is a FIELD rather than a constructor parameter on purpose. The
++ * constructor already takes twenty positional parameters and upstream appended
++ * `maxLookupResults` as the twentieth between 2.2.7 and 2.3.1, so position
++ * twenty-one is demonstrably where the next upstream parameter lands. A fork
++ * that claimed it would be silently renumbered on the rebase that adds one,
++ * and every positional caller would then read the wrong argument with no type
++ * error at all. A field costs no position and is how this engine's own tests
++ * already inject `logger`.
++ *
++ * The engine calls this inside its own try/catch: a reporter that throws must
++ * never turn a per-topic rejection into a whole-submit failure.
++ */
++export type TopicFailureReporter = (
++  topic: string,
++  error: unknown,
++  context: { txid: string, mode: 'historical-tx' | 'current-tx' | 'historical-tx-no-spv' }
++) => void
++
+ export class Engine {
+   /**
++   * Optional reporter for per-topic validation failures. Unset by default, so
++   * an engine that does not set it behaves exactly as upstream.
++   */
++  onTopicFailed?: TopicFailureReporter
++
++  /**
+    * Creates a new Overlay Services Engine
+    * @param {[key: string]: TopicManager} managers - manages topic admittance
+    * @param {[key: string]: LookupService} lookupServices - manages UTXO lookups
+@@ -593,6 +629,17 @@
+     } catch (error) {
+       this.logger.error(`Error validating topic during submit: topic=${serializeLogValue(topic)} error=${serializeErrorForLog(error)}`)
+       failedTopics.add(topic)
++      // Guarded deliberately. This hook exists for observability, and an
++      // observability hook that can change admission behaviour is worse than
++      // none: without the catch, a throwing reporter would turn a per-topic
++      // rejection into a whole-submit throw.
++      if (this.onTopicFailed !== undefined) {
++        try {
++          this.onTopicFailed(topic, error, { txid, mode })
++        } catch (reporterError) {
++          this.logger.error(`Error in onTopicFailed reporter: ${serializeErrorForLog(reporterError)}`)
++        }
++      }
+       return {
+         topic,
+         isDupe: false,

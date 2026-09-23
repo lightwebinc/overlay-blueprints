@@ -304,6 +304,7 @@ test('build_info carries installed dependency versions, not ranges', () => {
  */
 test('installedVersions resolves real versions, never "unknown"', () => {
   const v = installedVersions()
+  assert.equal(v.overlay_pkg, '@lightwebinc/overlay', 'build_info must name the package, because the fork keeps upstream\'s version number')
   for (const pkg of ['overlay', 'sdk', 'gasp']) {
     assert.notEqual(v[pkg], 'unknown', `${pkg} resolved to "unknown": the reporter is broken and reads as an answer`)
     assert.match(String(v[pkg]), /^\d+\.\d+\.\d+/, `${pkg} is not a concrete version`)
