@@ -45,6 +45,7 @@ async function main(): Promise<void> {
   const engine = buildEngine({
     managers,
     lookupServices,
+    maxLookupResults: cfg.maxLookupResults,
     storage,
     chainTracker,
     topics: cfg.topics,

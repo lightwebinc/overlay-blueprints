@@ -16,6 +16,23 @@ export interface EngineParts {
   readonly syncPeers?: Readonly<Record<string, readonly string[]>>
   /** Optional console the engine logs through; see CountingLogger. */
   readonly logger?: typeof console
+  /**
+   * Cap on lookup results the engine will hydrate per request. The engine's
+   * own default is 1000 and -1 opts out.
+   *
+   * It is exposed because the parity ORACLE asks `ls_anytx` for `{all:true}`,
+   * and that question returns one row per admitted output. A host that has
+   * been running for an afternoon holds far more than 1000, so the oracle --
+   * which is the acceptance gate for "both hosts agree object-for-object" --
+   * fails with HTTP 400 on exactly the hosts it is meant to check, and the
+   * gate silently becomes untestable at any realistic scale.
+   *
+   * It is NOT defaulted to -1. An unbounded lookup is a denial-of-service
+   * surface on a host with a public `/lookup`, and the cap is the engine's
+   * own protection. A reference host raises it deliberately; a public one
+   * should not.
+   */
+  readonly maxLookupResults?: number
 }
 
 /**
@@ -70,6 +87,11 @@ export function buildEngine(p: EngineParts): Engine {
     undefined, // throwOnBroadcastFailure
     undefined, // overlayBroadcastFacilitator
     p.logger, // logger: the ONLY way to see a per-peer sync failure, see below
+    undefined, // suppressDefaultSyncAdvertisements
+    undefined, // topicAnchorHeaderResolver
+    undefined, // basmSyncEnabled
+    undefined, // unprovenEvictionBlocks
+    p.maxLookupResults, // undefined keeps the engine's own default of 1000
   )
 }
 

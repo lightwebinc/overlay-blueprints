@@ -44,6 +44,15 @@ export interface Config {
    */
   readonly syncPeers: Readonly<Record<string, readonly string[]>>
   readonly logTime: boolean
+  /**
+   * Cap on lookup results the engine hydrates per request; -1 opts out.
+   *
+   * Left at the engine's own default (1000) unless set. It is configurable
+   * because the parity oracle's `{all:true}` question returns one row per
+   * admitted output, so the gate that proves two hosts agree object-for-object
+   * is the first thing the cap breaks.
+   */
+  readonly maxLookupResults?: number
 }
 
 class ConfigError extends Error {}
@@ -109,6 +118,25 @@ export function parseSyncPeers(raw: string, topics: readonly string[]): Record<s
   return out
 }
 
+/**
+ * Parses the lookup-result cap. Empty means "leave the engine's default
+ * alone", which is the safe posture; -1 means unbounded, which a public host
+ * should not choose. Anything else must be a positive integer, because the
+ * engine rejects the rest at construction and a config error caught here names
+ * the variable instead of surfacing as an opaque engine throw at startup.
+ */
+function parseMaxLookupResults(raw: string): number | undefined {
+  const v = raw.trim()
+  if (v === '') return undefined
+  const n = Number(v)
+  if (!Number.isSafeInteger(n) || (n !== -1 && n < 1)) {
+    throw new ConfigError(
+      `OVERLAY_MAX_LOOKUP_RESULTS ${raw} is not -1 or a positive integer`,
+    )
+  }
+  return n
+}
+
 export function loadConfig(): Config {
   const topics = optional('OVERLAY_TOPICS', '')
     .split(',')
@@ -130,6 +158,7 @@ export function loadConfig(): Config {
     adminToken: required('OVERLAY_ADMIN_TOKEN'),
     syncPeers: parseSyncPeers(optional('OVERLAY_SYNC_PEERS', ''), topics),
     logTime: optional('OVERLAY_LOG_TIME', 'false') === 'true',
+    maxLookupResults: parseMaxLookupResults(optional('OVERLAY_MAX_LOOKUP_RESULTS', '')),
   }
 }
 

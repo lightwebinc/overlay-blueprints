@@ -13,7 +13,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseSyncPeers, ConfigError } from './config.js'
+import { parseSyncPeers, ConfigError, loadConfig } from './config.js'
 import { parseTopics } from './http.js'
 import { assertReady, assertNoAdvertiser, AssertionError, countingLogger } from './engine.js'
 import { AnyTxLookupService } from './lookup/anytx.js'
@@ -225,4 +225,50 @@ test('the counting logger reads back failures the engine swallows', () => {
   assert.equal(typeof real.group, 'function')
   assert.equal(typeof real.assert, 'function')
   assert.equal(real.take(), 0)
+})
+
+/**
+ * The lookup cap is what breaks the parity ORACLE, which is C8's acceptance
+ * gate. `ls_anytx` answers `{all:true}` with one row per admitted output and
+ * offers no pagination, so a host that has been running for an afternoon
+ * exceeds the engine's default of 1000 and the oracle gets HTTP 400 from
+ * exactly the hosts it exists to compare. Measured live: 3,984 results on one
+ * host, 3,919 on the other, both refused.
+ *
+ * The default must stay the engine's own, because an unbounded lookup is a
+ * denial-of-service surface on a public /lookup.
+ */
+test('OVERLAY_MAX_LOOKUP_RESULTS is unset by default and refuses nonsense', () => {
+  const base = {
+    OVERLAY_TOPICS: 'tm_a',
+    OVERLAY_KNEX_URL: 'mysql://u:p@h/d',
+    OVERLAY_CHAIN_TRACKER_URL: 'http://127.0.0.1:9178',
+    OVERLAY_ADMIN_TOKEN: 't',
+  }
+  const saved = { ...process.env }
+  try {
+    for (const k of Object.keys(process.env)) if (k.startsWith('OVERLAY_')) delete process.env[k]
+    Object.assign(process.env, base)
+
+    // Unset: the engine keeps its own default, so the host does not quietly
+    // widen a DoS surface just by being deployed.
+    assert.equal(loadConfig().maxLookupResults, undefined)
+
+    // -1 is the documented opt-out and must be accepted verbatim.
+    process.env.OVERLAY_MAX_LOOKUP_RESULTS = '-1'
+    assert.equal(loadConfig().maxLookupResults, -1)
+
+    process.env.OVERLAY_MAX_LOOKUP_RESULTS = '50000'
+    assert.equal(loadConfig().maxLookupResults, 50000)
+
+    // 0 and -2 are rejected HERE, naming the variable, rather than surfacing
+    // as an opaque engine throw at construction time.
+    for (const bad of ['0', '-2', '1.5', 'many']) {
+      process.env.OVERLAY_MAX_LOOKUP_RESULTS = bad
+      assert.throws(() => loadConfig(), ConfigError, `expected ${bad} to be refused`)
+    }
+  } finally {
+    for (const k of Object.keys(process.env)) if (k.startsWith('OVERLAY_')) delete process.env[k]
+    Object.assign(process.env, saved)
+  }
 })
