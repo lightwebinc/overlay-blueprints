@@ -16,6 +16,7 @@ import { buildEngine, AssertionError, countingLogger } from './engine.js'
 import { AnyTxTopicManager } from './topics/anytx.js'
 import { AnyTxLookupService } from './lookup/anytx.js'
 import { Metrics } from './metrics.js'
+import { installedVersions } from './buildinfo.js'
 import { buildServer } from './http.js'
 import type { TopicManager, LookupService } from '@bsv/overlay'
 
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
   probeTimer.unref()
 
   const metrics = new Metrics()
+  metrics.info('overlay_host_build_info', installedVersions())
   metrics.gauge('overlay_host_indexed_outputs', () => index.size)
   metrics.gauge('overlay_host_ready', () => (lastReady ? 1 : 0))
 
@@ -133,3 +135,4 @@ main().catch((err: unknown) => {
   console.error(err)
   process.exit(1)
 })
+

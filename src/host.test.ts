@@ -19,6 +19,7 @@ import { assertReady, assertNoAdvertiser, AssertionError, countingLogger } from 
 import { AnyTxLookupService } from './lookup/anytx.js'
 import { AnyTxTopicManager } from './topics/anytx.js'
 import { Metrics } from './metrics.js'
+import { installedVersions } from './buildinfo.js'
 
 test('parseTopics accepts both wire forms', () => {
   assert.deepEqual(parseTopics('tm_a,tm_b'), ['tm_a', 'tm_b'])
@@ -271,4 +272,41 @@ test('OVERLAY_MAX_LOOKUP_RESULTS is unset by default and refuses nonsense', () =
     for (const k of Object.keys(process.env)) if (k.startsWith('OVERLAY_')) delete process.env[k]
     Object.assign(process.env, saved)
   }
+})
+
+/**
+ * build_info must carry the INSTALLED versions, not the manifest's ranges.
+ * A sibling component's version skew cost a ninety-minute total object-plane
+ * outage that no metric could see, because nothing published what was loaded.
+ * A label reading "unknown" would be worse than absent: it looks like an
+ * answer.
+ */
+test('build_info carries installed dependency versions, not ranges', () => {
+  const m = new Metrics()
+  m.info('overlay_host_build_info', { overlay: '2.3.1', sdk: '2.7.1', gasp: '1.3.6', node: '24.0.0' })
+  const out = m.render()
+  assert.match(out, /overlay_host_build_info\{.*overlay="2\.3\.1".*\} 1/)
+  // Labels render sorted, so the series identity is stable across restarts.
+  assert.match(out, /gasp="1\.3\.6",node="24\.0\.0",overlay="2\.3\.1",sdk="2\.7\.1"/)
+  // A range is not a version. If this ever renders a caret the reporter is
+  // reading package.json instead of what is installed.
+  assert.doesNotMatch(out, /[\^~]/)
+})
+
+/**
+ * The RESOLVER, not a hand-written label set. The first version of this test
+ * asserted against hardcoded labels, so it passed while the real reporter
+ * returned "unknown" for every package and that is exactly what got deployed.
+ *
+ * The cause is worth remembering: `require.resolve('<pkg>/package.json')`
+ * throws for any package whose `exports` map does not list "./package.json",
+ * which is most modern packages. Resolve the ENTRY POINT and walk up instead.
+ */
+test('installedVersions resolves real versions, never "unknown"', () => {
+  const v = installedVersions()
+  for (const pkg of ['overlay', 'sdk', 'gasp']) {
+    assert.notEqual(v[pkg], 'unknown', `${pkg} resolved to "unknown": the reporter is broken and reads as an answer`)
+    assert.match(String(v[pkg]), /^\d+\.\d+\.\d+/, `${pkg} is not a concrete version`)
+  }
+  assert.match(String(v.node), /^\d+\./)
 })
