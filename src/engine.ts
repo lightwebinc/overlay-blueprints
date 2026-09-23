@@ -14,6 +14,8 @@ export interface EngineParts {
    * `false` and the engine skips it in `startGASPSync`.
    */
   readonly syncPeers?: Readonly<Record<string, readonly string[]>>
+  /** Optional console the engine logs through; see CountingLogger. */
+  readonly logger?: typeof console
 }
 
 /**
@@ -63,7 +65,49 @@ export function buildEngine(p: EngineParts): Engine {
     undefined, // broadcaster
     undefined, // advertiser: THE posture. No advertiser, no propagation.
     syncConfiguration,
+    false, // logTime
+    undefined, // logPrefix
+    undefined, // throwOnBroadcastFailure
+    undefined, // overlayBroadcastFacilitator
+    p.logger, // logger: the ONLY way to see a per-peer sync failure, see below
   )
+}
+
+/** Reads back per-peer sync failures the engine swallowed. */
+export interface SyncErrorCounter {
+  take: () => number
+}
+
+/**
+ * A console the host can read failures back out of.
+ *
+ * `startGASPSync` catches every per-peer error, logs it and carries on, so its
+ * return value says nothing about whether anything synced. Without this the
+ * admin route answers 200 while every peer failed, which is the same defect as
+ * answering 200 while no peer is configured: a success that was never earned.
+ *
+ * It DELEGATES to the real console rather than reimplementing it: the engine's
+ * parameter is `typeof console`, which is a wide interface, and a hand-written
+ * stand-in would break the first time the engine called a method nobody
+ * thought to add.
+ *
+ * It COUNTS rather than parses. Any `error` during a sync is a failed peer,
+ * and matching on the message text would break the first time upstream
+ * reworded it.
+ */
+export function countingLogger(out: typeof console = console): typeof console & SyncErrorCounter {
+  let errors = 0
+  const logger = Object.create(out) as typeof console & SyncErrorCounter
+  logger.error = (...a: unknown[]): void => {
+    errors++
+    out.error(...a)
+  }
+  logger.take = (): number => {
+    const n = errors
+    errors = 0
+    return n
+  }
+  return logger
 }
 
 /**

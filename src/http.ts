@@ -9,6 +9,8 @@ export interface HttpDeps {
   readonly topics: readonly string[]
   /** Explicit catch-up peers per topic, so the admin route can say whether it had any. */
   readonly syncPeers: Readonly<Record<string, readonly string[]>>
+  /** Reads back per-peer sync failures the engine swallowed. */
+  readonly syncErrors?: { take: () => number }
   readonly ready: () => boolean
   readonly log: (msg: string, extra?: Record<string, unknown>) => void
 }
@@ -77,6 +79,8 @@ export function buildServer(d: HttpDeps): Server {
   d.metrics.preset('overlay_host_submits_total', { result: 'ok' })
   d.metrics.preset('overlay_host_submits_total', { result: 'malformed' })
   d.metrics.preset('overlay_host_submits_total', { result: 'error' })
+  d.metrics.preset('overlay_host_gasp_served_total', { result: 'ok' })
+  d.metrics.preset('overlay_host_gasp_served_total', { result: 'error' })
   d.metrics.preset('overlay_host_lookups_total', { result: 'ok' })
   d.metrics.preset('overlay_host_lookups_total', { result: 'malformed' })
   d.metrics.preset('overlay_host_lookups_total', { result: 'error' })
@@ -84,6 +88,7 @@ export function buildServer(d: HttpDeps): Server {
   // Preset too, because it is the value a correctly configured host never
   // emits and therefore the one an alert most needs to be able to match.
   d.metrics.preset('overlay_host_gasp_syncs_total', { result: 'no-peers' })
+  d.metrics.preset('overlay_host_gasp_syncs_total', { result: 'peer-error' })
   d.metrics.preset('overlay_host_gasp_syncs_total', { result: 'error' })
 
   return createServer((req, res) => {
@@ -176,6 +181,73 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
     return
   }
 
+  // ---- GASP peer endpoints.
+  //
+  // These are what make a host a usable CATCH-UP PEER. Without them a host can
+  // ASK a peer to sync and can never BE one: the engine's GASP client posts to
+  // these two paths, and a host that does not serve them answers 404 to every
+  // peer that tries. That failure is quiet on the asking side, which is how a
+  // catch-up trigger can look like it works while recovering nothing.
+  //
+  // Unauthenticated on purpose, like every other read on this host: they
+  // disclose the same outputs /lookup already does, to the same audience, and
+  // a token here would mean a token distributed to every peer.
+  if (req.method === 'POST' && path === '/requestSyncResponse') {
+    let body: Buffer
+    try {
+      body = await readBody(req, MAX_QUESTION)
+    } catch (err) {
+      d.metrics.inc('overlay_host_gasp_served_total', { result: 'malformed' })
+      json(res, err instanceof BodyTooLarge ? 413 : 400, { error: 'could not read the request body' })
+      return
+    }
+    const topic = req.headers['x-bsv-topic']
+    if (typeof topic !== 'string' || !d.topics.includes(topic)) {
+      d.metrics.inc('overlay_host_gasp_served_total', { result: 'unknown-topic' })
+      json(res, 400, { error: `this host does not carry: ${String(topic)}` })
+      return
+    }
+    try {
+      const answer = await d.engine.provideForeignSyncResponse(
+        JSON.parse(body.toString('utf8')) as never,
+        topic,
+      )
+      d.metrics.inc('overlay_host_gasp_served_total', { result: 'ok' })
+      json(res, 200, answer)
+    } catch (err) {
+      d.metrics.inc('overlay_host_gasp_served_total', { result: 'error' })
+      d.log('GASP sync response failed', { err: String(err) })
+      json(res, 400, { error: String((err as Error).message) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && path === '/requestForeignGASPNode') {
+    let body: Buffer
+    try {
+      body = await readBody(req, MAX_QUESTION)
+    } catch (err) {
+      d.metrics.inc('overlay_host_gasp_served_total', { result: 'malformed' })
+      json(res, err instanceof BodyTooLarge ? 413 : 400, { error: 'could not read the request body' })
+      return
+    }
+    try {
+      const q = JSON.parse(body.toString('utf8')) as {
+        graphID: string
+        txid: string
+        outputIndex: number
+      }
+      const node = await d.engine.provideForeignGASPNode(q.graphID, q.txid, q.outputIndex)
+      d.metrics.inc('overlay_host_gasp_served_total', { result: 'ok' })
+      json(res, 200, node)
+    } catch (err) {
+      d.metrics.inc('overlay_host_gasp_served_total', { result: 'error' })
+      d.log('GASP node request failed', { err: String(err) })
+      json(res, 400, { error: String((err as Error).message) })
+    }
+    return
+  }
+
   // ---- BRC-24 lookup
   if (req.method === 'POST' && path === '/lookup') {
     let body: Buffer
@@ -227,10 +299,21 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
     if (req.method === 'POST' && path === '/admin/startGASPSync') {
       const configured = Object.values(d.syncPeers).filter((u) => u.length > 0).length
       try {
+        d.syncErrors?.take() // clear anything from an earlier run
         await d.engine.startGASPSync()
-        const result = configured === 0 ? 'no-peers' : 'ok'
+        // startGASPSync catches every per-peer error and carries on, so its
+        // RETURN says nothing about whether a peer answered. Answering 200 on
+        // that alone is how a catch-up that recovered nothing looks like one
+        // that worked, which is exactly what happened the first time this was
+        // exercised against a peer that served no GASP routes.
+        const failed = d.syncErrors?.take() ?? 0
+        const result = configured === 0 ? 'no-peers' : failed > 0 ? 'peer-error' : 'ok'
         d.metrics.inc('overlay_host_gasp_syncs_total', { result })
-        json(res, 200, { status: result, topicsWithPeers: configured })
+        json(res, failed > 0 ? 502 : 200, {
+          status: result,
+          topicsWithPeers: configured,
+          peerFailures: failed,
+        })
       } catch (err) {
         d.metrics.inc('overlay_host_gasp_syncs_total', { result: 'error' })
         d.log('GASP sync failed', { err: String(err) })

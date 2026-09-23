@@ -12,7 +12,7 @@
 import { loadConfig, ConfigError } from './config.js'
 import { openStorage } from './storage.js'
 import { BridgeChainTracker } from './chaintracker.js'
-import { buildEngine, AssertionError } from './engine.js'
+import { buildEngine, AssertionError, countingLogger } from './engine.js'
 import { AnyTxTopicManager } from './topics/anytx.js'
 import { AnyTxLookupService } from './lookup/anytx.js'
 import { Metrics } from './metrics.js'
@@ -41,6 +41,7 @@ async function main(): Promise<void> {
   }
   lookupServices['ls_anytx'] = index
 
+  const syncErrors = countingLogger()
   const engine = buildEngine({
     managers,
     lookupServices,
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
     chainTracker,
     topics: cfg.topics,
     syncPeers: cfg.syncPeers,
+    logger: syncErrors,
   })
   const peered = Object.values(cfg.syncPeers).filter((u) => u.length > 0).length
   log('engine built with no advertiser: propagation is off', {
@@ -99,6 +101,7 @@ async function main(): Promise<void> {
     adminToken: cfg.adminToken,
     topics: cfg.topics,
     syncPeers: cfg.syncPeers,
+    syncErrors,
     ready,
     log,
   })

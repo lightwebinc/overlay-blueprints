@@ -129,6 +129,43 @@ counters now distinguish what the old ones conflated.
 | a 100 KB `POST /lookup` body | 413 with `overlay_host_lookups_total{result="malformed"}`. It used to escape the handler, because only `/submit` caught the size throw |
 | the parity oracle over the same host | three sorted outpoints, and every merkle proof `VERIFIED` against an independent header service |
 
+### Two hosts, a plane between them, and a recovery
+
+Run 2026-09-22 with the whole stack up: two bridges, two of these hosts, two
+MySQL instances, and an edge that writes the same delivery records to both
+bridges' object lanes.
+
+| Exercise | Result |
+| --- | --- |
+| one publish, delivered to both bridges | both bridges submitted 8, both engines admitted 8 |
+| `overlayverify ids` on each host | **byte-identical**, 8 outpoints each |
+| merkle proofs, checked against an independent header service | `VERIFIED` on both hosts |
+| root provenance at the bridges | 16 from the header **lane**, **0 misses**. The engine verified against headers the bridge received itself, not a third party |
+| every outbound connection each host held during delivery | **its own MySQL, and nothing else.** No peer, no discovery overlay, nothing off-box |
+| positive control for that capture | with a catch-up peer configured, the same per-process check captured the host dialling both its bridge and the peer. So it sees outbound connections when they exist |
+| wipe one host's database entirely, then catch up from the peer | **recovered all 8, byte-identical to the peer** |
+
+The recovery is the one worth dwelling on. A host that lost its whole database
+rebuilt itself from a peer over the same standards it serves, with no operator
+intervention beyond one authenticated call.
+
+### Two defects that run found, both fixed
+
+**The host could ASK for catch-up and could never BE a peer.** It served no
+`/requestSyncResponse` or `/requestForeignGASPNode`, so every peer that tried
+to sync from it got a 404. Both routes are mounted now.
+
+**And the admin route answered 200 while that failed.** `startGASPSync`
+catches every per-peer error, logs it and carries on, so its return value says
+nothing about whether anything synced. The route now counts the engine's error
+calls and answers `{"status":"peer-error","peerFailures":N}` with a 502.
+Measured both ways: `peerFailures: 0` on the recovery above, and
+`peer-error` / 502 against a peer that serves no GASP routes.
+
+That is the second time on this host that a success was reported for work that
+did not happen, and both had the same shape: a 200 produced by a path that
+never ran.
+
 ### Tools referred to here
 
 `overlayverify` and `txmint overlay` are not in this repository and are not

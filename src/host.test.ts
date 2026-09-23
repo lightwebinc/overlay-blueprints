@@ -15,7 +15,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseSyncPeers, ConfigError } from './config.js'
 import { parseTopics } from './http.js'
-import { assertReady, assertNoAdvertiser, AssertionError } from './engine.js'
+import { assertReady, assertNoAdvertiser, AssertionError, countingLogger } from './engine.js'
 import { AnyTxLookupService } from './lookup/anytx.js'
 import { AnyTxTopicManager } from './topics/anytx.js'
 import { Metrics } from './metrics.js'
@@ -194,4 +194,35 @@ test('a topic with no configured peers is false, which the engine skips outright
   // And an advertiser arriving through a widened type is refused, although
   // EngineParts has no such field today.
   assert.throws(() => assertReady({ ...parts, advertiser: {} } as never), AssertionError)
+})
+
+// startGASPSync catches every per-peer error and carries on, so its return
+// says nothing about whether a peer answered. Counting the engine's error
+// calls is the only way the host can tell, and without it a catch-up that
+// recovered nothing answers 200 — which is exactly what happened the first
+// time this was run against a peer serving no GASP routes.
+test('the counting logger reads back failures the engine swallows', () => {
+  const quiet = { log() {}, info() {}, warn() {}, debug() {}, error() {} } as unknown as typeof console
+  const l = countingLogger(quiet)
+
+  assert.equal(l.take(), 0)
+  l.error('[GASP SYNC] Sync failed for topic "tm_a" with peer "..."')
+  l.error('another peer failed')
+  assert.equal(l.take(), 2)
+  // take() resets, so a later sync is not judged by an earlier one's failures.
+  assert.equal(l.take(), 0)
+
+  l.info('info does not count as a failure')
+  assert.equal(l.take(), 0)
+
+  // It DELEGATES rather than reimplementing. The engine's parameter is the
+  // whole console interface, and a hand-written stand-in breaks the first time
+  // the engine calls a method nobody thought to add. Checked against the real
+  // console, because that is what it delegates to in the host; checking it
+  // against the five-method stub above would only prove the stub's shape.
+  const real = countingLogger()
+  assert.equal(typeof real.table, 'function')
+  assert.equal(typeof real.group, 'function')
+  assert.equal(typeof real.assert, 'function')
+  assert.equal(real.take(), 0)
 })
