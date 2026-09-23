@@ -1,0 +1,78 @@
+{
+  "description": "One complete finger token. Fields are PushDrop fields in order; the concatenation below is what the signature covers (fields 1..9) plus the signature itself.",
+  "field_count_without_signature": 9,
+  "fields": [
+    {
+      "name": "magic",
+      "offset": 0,
+      "len": 8,
+      "hex": "6266696e67657201",
+      "note": "bfinger + version byte 0x01"
+    },
+    {
+      "name": "identity_key",
+      "offset": 8,
+      "len": 33,
+      "hex": "038269c4be72a3a3a296adc4321246e845b9c1dc45ab290bd08e25546c773691c7",
+      "note": "compressed secp256k1, the subject"
+    },
+    {
+      "name": "sequence",
+      "offset": 41,
+      "len": 8,
+      "hex": "0000000000000007",
+      "note": "big-endian, strictly increasing"
+    },
+    {
+      "name": "not_before",
+      "offset": 49,
+      "len": 8,
+      "hex": "000000006ab13b80",
+      "note": "big-endian unix seconds; 0 = no lower bound"
+    },
+    {
+      "name": "not_after",
+      "offset": 57,
+      "len": 8,
+      "hex": "000000006b49d200",
+      "note": "big-endian unix seconds; 0 = no expiry"
+    },
+    {
+      "name": "kind",
+      "offset": 65,
+      "len": 1,
+      "hex": "02",
+      "note": "2 = update"
+    },
+    {
+      "name": "body",
+      "offset": 66,
+      "len": 70,
+      "hex": "7b22737461747573223a22617661696c61626c65222c22706c616e223a2270726f222c226c696e6b223a2268747470733a2f2f6578616d706c652e636f6d2f616c696365227d",
+      "note": "JSON profile, bounded at 4096"
+    },
+    {
+      "name": "writer_key",
+      "offset": 136,
+      "len": 33,
+      "hex": "022ef6949d44c053c7d69e6a51d5cfbb0731418411a328473aaa94bc6374136207",
+      "note": "the key that SIGNED: here the delegate, not the identity"
+    },
+    {
+      "name": "delegates",
+      "offset": 169,
+      "len": 34,
+      "hex": "022ef6949d44c053c7d69e6a51d5cfbb0731418411a328473aaa94bc637413620703",
+      "note": "33-byte key + 1-byte rights mask; 0x03 = status|plan"
+    },
+    {
+      "name": "signature",
+      "offset": 203,
+      "len": 71,
+      "hex": "3045022100c9d51368b14a6916b5e71276109a39dec8ca889ce35aa3f555303fb7fa70d4d002202353975c2d87aca92837a80ccdfd8fc2c33b512318de0e02ec169cfaef8b15a2",
+      "note": "DER over fields 1..9 concatenated, sha256 then sign"
+    }
+  ],
+  "signed_bytes": 203,
+  "total_bytes": 274
+}
