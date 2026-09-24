@@ -311,3 +311,58 @@ test('installedVersions resolves real versions, never "unknown"', () => {
   }
   assert.match(String(v.node), /^\d+\./)
 })
+
+/**
+ * Pagination, and specifically KEYSET pagination.
+ *
+ * The unpaged `{all:true}` answer failed twice on real hosts: against the
+ * engine's 1000-result hydration cap, and then against a 64 MiB response bound
+ * at 33,093 outputs. The acceptance gate that compares two hosts was
+ * unevaluable on exactly the hosts it exists to compare.
+ */
+test('ls_anytx pages {all:true} and the walk is stable under mid-walk admission', async () => {
+  const ls = new AnyTxLookupService()
+  const key = (n: number): string => `${String(n).padStart(4, '0')}${'a'.repeat(60)}`
+  for (let i = 0; i < 2500; i++) {
+    ls.outputAdmittedByTopic({
+      mode: 'locking-script', txid: key(i), outputIndex: 0, topic: 'tm_a',
+      satoshis: 1, lockingScript: {} as never,
+    })
+  }
+
+  // A bare {all:true} is BOUNDED now. That is the correction: it used to
+  // return the whole index.
+  const first = await ls.lookup({ service: 'ls_anytx', query: { all: true } } as never)
+  assert.equal(first.length, AnyTxLookupService.PAGE)
+
+  // Walk the whole index by cursor and check we saw every row exactly once.
+  const seen: string[] = []
+  let after: string | undefined
+  for (;;) {
+    const page = (await ls.lookup({
+      service: 'ls_anytx',
+      query: after === undefined ? { all: true } : { all: true, after },
+    } as never)) as Array<{ txid: string; outputIndex: number }>
+    if (page.length === 0) break
+    for (const o of page) seen.push(`${o.txid}.${o.outputIndex}`)
+    const last = page[page.length - 1]
+    after = `${last?.txid}.${last?.outputIndex}`
+    // Admit a row BEHIND the cursor mid-walk. Under offset pagination this
+    // shifts every later row and the walk silently repeats one and skips one —
+    // in a parity oracle that is indistinguishable from real divergence.
+    if (seen.length === AnyTxLookupService.PAGE) {
+      ls.outputAdmittedByTopic({
+        mode: 'locking-script', txid: key(0) + 'z', outputIndex: 9, topic: 'tm_a',
+        satoshis: 1, lockingScript: {} as never,
+      })
+    }
+  }
+  assert.equal(seen.length, 2500, 'the keyset walk must see every original row exactly once')
+  assert.equal(new Set(seen).size, 2500, 'no row may be returned twice')
+
+  // An explicit limit is honoured, and cannot exceed the page bound.
+  const small = await ls.lookup({ service: 'ls_anytx', query: { all: true, limit: 7 } } as never)
+  assert.equal(small.length, 7)
+  const capped = await ls.lookup({ service: 'ls_anytx', query: { all: true, limit: 99999 } } as never)
+  assert.equal(capped.length, AnyTxLookupService.PAGE, 'limit must not exceed the page bound')
+})

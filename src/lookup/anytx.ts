@@ -30,6 +30,28 @@ import type { LookupQuestion } from '@bsv/sdk'
  * service never holds object bytes, and two hosts comparing answers are
  * comparing exactly the outpoints each admitted.
  */
+/**
+ * Index of the first key strictly greater than `after`.
+ *
+ * Binary search rather than a filter: the walk is O(pages x log n) instead of
+ * O(pages x n), which matters because the oracle calls this once per page over
+ * an index that is tens of thousands of rows and growing.
+ */
+function upperBound(keys: readonly string[], after: string): number {
+  let lo = 0
+  let hi = keys.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    // noUncheckedIndexedAccess is on: mid is always in range here, but the
+    // compiler cannot know that, and a non-null assertion would be the wrong
+    // habit to establish in an index walk.
+    const k = keys[mid] ?? ''
+    if (k <= after) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 export class AnyTxLookupService implements LookupService {
   /**
    * `locking-script` rather than `whole-tx`: the admission callback then
@@ -92,23 +114,54 @@ export class AnyTxLookupService implements LookupService {
     this.admitted.delete(AnyTxLookupService.key(txid, outputIndex))
   }
 
+  /** Outpoints per page when `{ all: true }` does not ask for fewer. */
+  static readonly PAGE = 1000
+
   /**
-   * Two questions, both deliberately small:
+   * Three questions:
    *
-   *   { outpoint: "<txid>.<index>" }  one outpoint, present or not
-   *   { all: true }                   every outpoint this host holds, sorted
+   *   { outpoint: "<txid>.<index>" }        one outpoint, present or not
+   *   { all: true }                         one PAGE of outpoints, sorted
+   *   { all: true, after: "<outpoint>",
+   *     limit?: number }                    the next page after that outpoint
    *
-   * The second is what the parity oracle records, and it is sorted so two
+   * `{ all: true }` is what the parity oracle walks, and it is sorted so two
    * hosts produce byte-comparable answers rather than answers that agree as
-   * sets and differ as lists. It is a whole-index read, which a real lookup
-   * service would bound; here the index is the fixed phase-0 object set and
-   * the comparison needs all of it.
+   * sets and differ as lists.
+   *
+   * IT IS PAGED, and that is a correction rather than a feature. This used to
+   * return the whole index, on the assumption written here that "the index is
+   * the fixed phase-0 object set". That assumption expired: a host running for
+   * an afternoon holds tens of thousands of outputs, and the unpaged answer
+   * failed twice over - first against the engine's own 1000-result hydration
+   * cap, and then, with that cap lifted, against a 64 MiB response bound at
+   * 33,093 outputs. The acceptance gate that compares two hosts was therefore
+   * unevaluable on exactly the hosts it exists to compare.
+   *
+   * Pagination is KEYSET, not offset. An offset walk over an index that is
+   * still admitting silently skips and repeats rows, which in a parity oracle
+   * is indistinguishable from the divergence it is looking for. `after` is an
+   * outpoint and the walk is strictly greater than it, so a row admitted
+   * mid-walk either lands ahead of the cursor and is seen, or behind it and is
+   * not - never both, never neither.
    */
   async lookup(question: LookupQuestion): Promise<LookupFormula> {
-    const q = question.query as { outpoint?: unknown; all?: unknown } | undefined
+    const q = question.query as {
+      outpoint?: unknown
+      all?: unknown
+      after?: unknown
+      limit?: unknown
+    } | undefined
     if (q?.all === true) {
-      return [...this.admitted.keys()]
-        .sort()
+      const limit =
+        typeof q.limit === 'number' && Number.isInteger(q.limit) && q.limit > 0
+          ? Math.min(q.limit, AnyTxLookupService.PAGE)
+          : AnyTxLookupService.PAGE
+      const after = typeof q.after === 'string' ? q.after : undefined
+      const keys = [...this.admitted.keys()].sort()
+      const start = after === undefined ? 0 : upperBound(keys, after)
+      return keys
+        .slice(start, start + limit)
         .map((o) => AnyTxLookupService.split(o))
         .filter((o): o is { txid: string; outputIndex: number } => o !== undefined)
     }
