@@ -199,7 +199,8 @@ test('loadModules loads a stub module from a file and mounts it over the default
     assert.ok(managers['tm_a'] instanceof AnyTxTopicManager)
     const restore = loaded[0]?.module.lookups?.['ls_stub']?.restore
     assert.equal(typeof restore, 'function')
-    assert.equal(restore?.([{} as never, {} as never]), 2)
+    // The stub ignores the storage it is handed; the contract still hands one.
+    assert.equal(await restore?.([{} as never, {} as never], { findOutput: async () => null }), 2)
 
     // And the same module against a configuration that does not name its
     // topic is refused with the topic in the message.

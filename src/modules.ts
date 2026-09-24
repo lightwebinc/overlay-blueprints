@@ -36,14 +36,29 @@ export interface ModuleHost {
 }
 
 /**
+ * The one storage call a restore may make: the engine's Storage.findOutput,
+ * narrowed to the arguments a module needs. The host passes its real storage
+ * object; the engine's extra optional parameters (spent, includeBEEF) make it
+ * assignable here. It lets a service read an output that is NOT among the
+ * unspent rows it was handed, with `spent` and `consumedBy` saying who spent
+ * it, which is what a service whose objects are retracted by a spend needs
+ * to rebuild that retraction after a restart.
+ */
+export interface RestoreStorage {
+  findOutput: (txid: string, outputIndex: number, topic?: string) => Promise<Output | null>
+}
+
+/**
  * A lookup service that can rebuild its index from storage on start. The
  * engine does not replay past admissions into a lookup service, so a module
  * whose index lives in memory must offer this or come back empty after every
  * restart. It is called with the unspent outputs of the topics the SAME module
- * declares, before the port opens, and returns how many it indexed.
+ * declares and the host's storage, before the port opens, and returns how
+ * many it indexed, synchronously or not: a restore that must ask storage
+ * about spent outputs is asynchronous, and the host awaits it either way.
  */
 export interface RestorableLookupService extends LookupService {
-  restore?: (outputs: Output[]) => number
+  restore?: (outputs: Output[], storage: RestoreStorage) => number | Promise<number>
 }
 
 export interface Module {

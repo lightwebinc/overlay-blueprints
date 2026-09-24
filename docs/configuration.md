@@ -60,9 +60,16 @@ interface ModuleHost {
   }
 }
 
+interface RestoreStorage {
+  findOutput: (txid: string, outputIndex: number, topic?: string) => Promise<Output | null>
+}
+
 interface Module {
   topics?: Record<string, TopicManager>
-  lookups?: Record<string, LookupService & { restore?: (outputs: Output[]) => number }>
+  lookups?: Record<
+    string,
+    LookupService & { restore?: (outputs: Output[], storage: RestoreStorage) => number | Promise<number> }
+  >
 }
 ```
 
@@ -79,12 +86,18 @@ with the module's path in the message:
   last value.
 - A module that mounts nothing is refused.
 
-A module's lookup service may offer `restore(outputs)`. The engine does not
-replay past admissions into a lookup service on start, so an in-memory index
-comes back empty after every restart without it. The host calls it before the
-port opens with the unspent outputs of the topics that **same module**
-declares (`outputScript` included, so an index can be rebuilt by parsing each
-script), and logs the count it returned.
+A module's lookup service may offer `restore(outputs, storage)`. The engine
+does not replay past admissions into a lookup service on start, so an
+in-memory index comes back empty after every restart without it. The host
+calls it before the port opens with the unspent outputs of the topics that
+**same module** declares (`outputScript` included, so an index can be rebuilt
+by parsing each script; `outputsConsumed` too, so an output's retained
+inputs are known) and with its storage, awaits the result whether or not it
+is a promise, and logs the count it returned. `storage.findOutput` is the
+engine's own: it answers for spent outputs as well, with `spent` and
+`consumedBy`, so a service whose objects are retracted when an output they
+spend is spent again can rebuild that retraction rather than lose it on
+restart.
 
 The host resolves the module by `import()` of its absolute path, so the
 module's own bare-specifier imports (for example `@bsv/sdk`) resolve from the

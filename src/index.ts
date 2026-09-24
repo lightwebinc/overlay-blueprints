@@ -102,7 +102,9 @@ async function main(): Promise<void> {
       outputs.push(...(await storage.findUTXOsForTopic(t)))
     }
     for (const [name, ls] of restorable) {
-      const n = ls.restore?.(outputs) ?? 0
+      // The real storage object goes through: a restore that must know who
+      // spent an output the unspent rows do not carry asks it directly.
+      const n = (await ls.restore?.(outputs, storage)) ?? 0
       log('module lookup restored from storage', { path, lookup: name, outputs: n })
     }
   }
