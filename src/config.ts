@@ -53,6 +53,13 @@ export interface Config {
    * is the first thing the cap breaks.
    */
   readonly maxLookupResults?: number
+  /**
+   * Host-side modules, as absolute paths to compiled ES modules. Empty by
+   * default. Each must default-export `create(host)` and returns the topic
+   * managers and lookup services it mounts; see src/modules.ts for the
+   * contract and docs/configuration.md for the operator's view.
+   */
+  readonly modules: readonly string[]
 }
 
 class ConfigError extends Error {}
@@ -137,6 +144,28 @@ function parseMaxLookupResults(raw: string): number | undefined {
   return n
 }
 
+/**
+ * Parses `OVERLAY_MODULES`, a comma list of absolute paths.
+ *
+ * Refuses rather than filters, for the same reason the peer parser does: a
+ * module entry dropped silently would leave a topic on the default
+ * admit-everything manager while the operator believes it is selective. A
+ * relative path is refused too, because it would resolve against wherever the
+ * process started, which is not something an operator can read off the unit.
+ */
+export function parseModules(raw: string): string[] {
+  const out: string[] = []
+  if (raw.trim() === '') return out
+  for (const entry of raw.split(',')) {
+    const path = entry.trim()
+    if (path === '') throw new ConfigError('OVERLAY_MODULES contains an empty entry')
+    if (!path.startsWith('/')) throw new ConfigError(`OVERLAY_MODULES: "${path}" is not an absolute path`)
+    if (out.includes(path)) throw new ConfigError(`OVERLAY_MODULES names "${path}" twice`)
+    out.push(path)
+  }
+  return out
+}
+
 export function loadConfig(): Config {
   const topics = optional('OVERLAY_TOPICS', '')
     .split(',')
@@ -159,6 +188,7 @@ export function loadConfig(): Config {
     syncPeers: parseSyncPeers(optional('OVERLAY_SYNC_PEERS', ''), topics),
     logTime: optional('OVERLAY_LOG_TIME', 'false') === 'true',
     maxLookupResults: parseMaxLookupResults(optional('OVERLAY_MAX_LOOKUP_RESULTS', '')),
+    modules: parseModules(optional('OVERLAY_MODULES', '')),
   }
 }
 

@@ -18,7 +18,8 @@ import { AnyTxLookupService } from './lookup/anytx.js'
 import { Metrics } from './metrics.js'
 import { installedVersions } from './buildinfo.js'
 import { buildServer } from './http.js'
-import type { TopicManager, LookupService } from '@lightwebinc/overlay'
+import { loadModules, mountModules } from './modules.js'
+import type { TopicManager, LookupService, Output } from '@lightwebinc/overlay'
 
 function log(msg: string, extra: Record<string, unknown> = {}): void {
   const parts = Object.entries(extra).map(([k, v]) => `${k}=${String(v)}`)
@@ -34,6 +35,11 @@ async function main(): Promise<void> {
 
   const chainTracker = new BridgeChainTracker(cfg.chainTrackerUrl)
 
+  // Created before the modules load, because a module presets and counts
+  // through it from its factory onwards, and a second registry would be a
+  // second /metrics to scrape.
+  const metrics = new Metrics()
+
   const managers: Record<string, TopicManager> = {}
   const lookupServices: Record<string, LookupService> = {}
   const index = new AnyTxLookupService()
@@ -41,6 +47,16 @@ async function main(): Promise<void> {
     managers[t] = new AnyTxTopicManager()
   }
   lookupServices['ls_anytx'] = index
+
+  // Modules load after storage and before the engine: a module's manager
+  // replaces the default on the topics it claims, so the engine must never
+  // see the default there, and a module that fails to load must stop the
+  // host before it admits anything under the wrong manager.
+  const loaded = await loadModules(cfg.modules, { log, metrics })
+  const mounted = mountModules(loaded, cfg.topics, managers, lookupServices)
+  for (const m of mounted) {
+    log('module loaded', { path: m.path, topics: m.topics.join(','), lookups: m.lookups.join(',') })
+  }
 
   const syncErrors = countingLogger()
   const engine = buildEngine({
@@ -74,6 +90,23 @@ async function main(): Promise<void> {
   }
   log('lookup index restored from storage', { outputs: restored })
 
+  // The same for every module lookup that can rebuild itself, fed the unspent
+  // outputs of the topics that module declares. Fetched once per module, not
+  // once per lookup, and only for lookups that ask: a module whose index is
+  // durable elsewhere has nothing to restore.
+  for (const { path, module } of loaded) {
+    const restorable = Object.entries(module.lookups ?? {}).filter(([, ls]) => typeof ls.restore === 'function')
+    if (restorable.length === 0) continue
+    const outputs: Output[] = []
+    for (const t of Object.keys(module.topics ?? {})) {
+      outputs.push(...(await storage.findUTXOsForTopic(t)))
+    }
+    for (const [name, ls] of restorable) {
+      const n = ls.restore?.(outputs) ?? 0
+      log('module lookup restored from storage', { path, lookup: name, outputs: n })
+    }
+  }
+
   // Readiness: storage answers and the chain tracker answers. Both are
   // re-checked rather than cached, because a host that came up healthy and
   // lost its chain tracker is not ready and should say so.
@@ -93,7 +126,6 @@ async function main(): Promise<void> {
   const probeTimer = setInterval(() => void probe(), 10_000)
   probeTimer.unref()
 
-  const metrics = new Metrics()
   // The reason this host runs a forked engine.
   //
   // Upstream's `submit` catches every per-topic validation error into a local

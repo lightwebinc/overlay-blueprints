@@ -16,6 +16,7 @@ nothing sensitive is written into this repository.
 | `OVERLAY_PORT` | `8080` | Listen port |
 | `OVERLAY_SYNC_PEERS` | empty | Catch-up peers, `topic=url[,url][;topic=url]`. Empty means this host never syncs with anyone, and the admin catch-up route is then a no-op that reports itself as one. Every URL must be http or https and every topic must be one this host mounts; a malformed entry stops startup rather than being dropped |
 | `OVERLAY_LOG_TIME` | `false` | Engine timing logs |
+| `OVERLAY_MODULES` | empty | Comma list of absolute paths to host-side modules (compiled ES modules). Each must name topics `OVERLAY_TOPICS` already names, and its manager replaces `tm_anytx` on them. A malformed entry, a relative path, an unknown topic or a duplicate lookup name stops startup rather than being dropped. See [Modules](#modules) |
 
 A missing or malformed required value stops the process before the port opens,
 with a one-line message and exit code 2. It is not a stack trace: a
@@ -32,6 +33,68 @@ refuses to start on each:
   with no error at all.
 - **A topic with no manager**, or a manager mounted for a topic that is not
   configured.
+
+## Modules
+
+The host mounts `tm_anytx` on every configured topic and `ls_anytx` beside
+it, and knows nothing else about any topic. An application that needs a real
+topic manager, one that decides what belongs in its topic, lives in its own
+repository and is loaded here by path:
+
+```sh
+OVERLAY_TOPICS=tm_anytx,tm_example
+OVERLAY_MODULES=/opt/overlay/modules/example/index.js
+```
+
+A module is a compiled ES module whose default export is a factory:
+
+```ts
+export default function create(host: ModuleHost): Module | Promise<Module>
+
+interface ModuleHost {
+  log: (msg: string, extra?: Record<string, unknown>) => void
+  metrics: {
+    inc: (name: string, labels?: Record<string, string>, by?: number) => void
+    preset: (name: string, labels?: Record<string, string>) => void
+    gauge: (name: string, fn: () => number) => void
+  }
+}
+
+interface Module {
+  topics?: Record<string, TopicManager>
+  lookups?: Record<string, LookupService & { restore?: (outputs: Output[]) => number }>
+}
+```
+
+The rules, each enforced before the port opens and each a startup refusal
+with the module's path in the message:
+
+- Every topic a module mounts must already be named in `OVERLAY_TOPICS`, so
+  the environment alone says which topics a host carries. The module's
+  manager then **replaces** `tm_anytx` on that topic. Topics no module claims
+  keep `tm_anytx`.
+- Two modules may not mount the same topic.
+- A lookup name must be new: not `ls_anytx`, not one another module mounted.
+  The engine keys both maps by name and a duplicate would silently keep the
+  last value.
+- A module that mounts nothing is refused.
+
+A module's lookup service may offer `restore(outputs)`. The engine does not
+replay past admissions into a lookup service on start, so an in-memory index
+comes back empty after every restart without it. The host calls it before the
+port opens with the unspent outputs of the topics that **same module**
+declares (`outputScript` included, so an index can be rebuilt by parsing each
+script), and logs the count it returned.
+
+The host resolves the module by `import()` of its absolute path, so the
+module's own bare-specifier imports (for example `@bsv/sdk`) resolve from the
+nearest `node_modules` above the module file. Placing the compiled module
+inside the host's tree, beside its `node_modules`, is what makes a module
+share the host's SDK copy rather than carry a second one.
+
+Metrics a module counts through `host.metrics` render on `/metrics` beside the
+host's own. Preset every series a module will increment, for the reason the
+host presets its own: a counter absent until its first event reads as healthy.
 
 ## Catch-up
 
