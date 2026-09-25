@@ -1,10 +1,8 @@
 # Configuration
 
-Every setting is an environment variable, and the ones that carry secrets
-arrive through an `EnvironmentFile=` on the host: mode 0600, owned by the
-service user, and referenced by the unit. These hosts are built out of band
-and never converged, so there is no fleet secret mechanism to inherit, and
-nothing sensitive is written into this repository.
+Every setting is an environment variable. The ones that carry secrets belong
+in an `EnvironmentFile=` on the host (mode 0600, owned by the service user),
+never in a repository.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -15,6 +13,7 @@ nothing sensitive is written into this repository.
 | `OVERLAY_LISTEN` | `0.0.0.0` | Listen address |
 | `OVERLAY_PORT` | `8080` | Listen port |
 | `OVERLAY_SYNC_PEERS` | empty | Catch-up peers, `topic=url[,url][;topic=url]`. Empty means this host never syncs with anyone, and the admin catch-up route is then a no-op that reports itself as one. Every URL must be http or https and every topic must be one this host mounts; a malformed entry stops startup rather than being dropped |
+| `OVERLAY_MAX_LOOKUP_RESULTS` | engine default | Cap on the outputs one lookup answers. `-1` is unbounded, which a public host should not choose; anything else must be a positive integer |
 | `OVERLAY_LOG_TIME` | `false` | Engine timing logs |
 | `OVERLAY_MODULES` | empty | Comma list of absolute paths to host-side modules (compiled ES modules). Each must name topics `OVERLAY_TOPICS` already names, and its manager replaces `tm_anytx` on them. A malformed entry, a relative path, an unknown topic or a duplicate lookup name stops startup rather than being dropped. See [Modules](#modules) |
 
@@ -118,9 +117,10 @@ on a host with no peers configured the route returns 200 having done nothing.
 
 It reports `{"status":"no-peers"}` and counts
 `overlay_host_gasp_syncs_total{result="no-peers"}` in that case, and the host
-says so once at startup. This is spelled out because a 200 and a success
-counter were once read as proof that catch-up worked. They prove the bearer
-check works.
+says so once at startup. A 200 from this route on such a host proves the bearer
+check and nothing else. A peer that fails answers `{"status":"peer-error"}`
+with a 502, because the engine logs per-peer errors and carries on, so its own
+return value says nothing about whether anything synced.
 
 ## Readiness
 
@@ -146,9 +146,9 @@ not a broken file.
 
 ## Running a stock server instead
 
-This host is propagation route 1. The other supported posture is a stock
-`overlay-express` server with `configureEngineParams({ slapTrackers: [],
-shipTrackers: [], advertiser })`. Two things to know before choosing it:
+The other supported posture is a stock `overlay-express` server with
+`configureEngineParams({ slapTrackers: [], shipTrackers: [], advertiser })`.
+Two things to know before choosing it:
 
 - It is **not quiet**. Its propagation step runs, resolves no peer, and
   records that failure on every submission that admits an output. Do not

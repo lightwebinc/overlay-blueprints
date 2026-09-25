@@ -29,16 +29,12 @@ that legitimately admitted nothing are byte-identical to the caller. A host
 admitting nothing therefore looks exactly like a quiet plane, and every counter
 built on "did a submit succeed" climbs at full rate while nothing is admitted.
 
-That is not hypothetical here. A version skew one component earlier caused a
-ninety-minute total object-plane outage that no metric could see, and the
-mitigation for this engine-side variant can currently only be a twenty-minute
-conjunction rather than an alert on the first failure.
+A host that admits nothing is the outage no metric sees, and without this
+hook the only mitigation is a slow conjunction of counters rather than an
+alert on the first failure.
 
-The alternative considered and rejected was matching the log line, which is
-unconditional and sits immediately before the `failedTopics.add`. It is exact
-today and needs no fork. It was rejected because it is string matching against
-a message upstream is free to reword, which the consuming host already forbids
-itself in writing.
+Matching the engine's log line would need no fork and is exact today, but it
+is string matching against a message upstream is free to reword.
 
 ## Why a FIELD and not a constructor parameter
 
@@ -62,5 +58,4 @@ plainly which release it tracks.
 ## Upstream
 
 The defect is present unchanged at upstream HEAD (2.6.1), so this delta
-survives a rebase and is worth offering upstream. Raising it is an operator
-decision under the standing "record, do not raise" ruling.
+survives a rebase and is worth offering upstream.
