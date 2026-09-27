@@ -26,7 +26,17 @@ import os
 import subprocess
 import sys
 
-LICENSE_NAMES = ("LICENSE", "LICENSE.txt", "LICENSE.md", "LICENCE", "COPYING", "License")
+# Matched case-insensitively against the file's stem. Publishers use every
+# spelling there is: LICENSE, LICENSE.md, license, license.md, COPYING. A
+# case-sensitive list silently reports a package as having no licence when it
+# ships one, which reads as an upstream failing rather than a bug here.
+LICENSE_STEMS = ("license", "licence", "copying")
+LICENSE_EXTS = ("", ".txt", ".md", ".rst")
+
+# A package may ship its licences in a directory rather than a flat file, which
+# is the REUSE layout and what the BSV packages use. The text still has to
+# travel with a binary, so a directory counts.
+LICENSE_DIRS = ("licenses", "licences")
 
 
 def run(args, cwd):
@@ -71,10 +81,29 @@ def module_dir(repo, mod):
 
 
 def license_files(d):
+    """Every licence text a package ships, in a stable order.
+
+    Sorted rather than in the order of a name list, so the generated file is
+    reproducible whatever the filesystem hands back.
+    """
     found = []
-    for name in LICENSE_NAMES:
-        p = os.path.join(d, name)
-        if os.path.isfile(p):
+    try:
+        entries = sorted(os.listdir(d))
+    except OSError:
+        return found
+    for e in entries:
+        p = os.path.join(d, e)
+        low = e.lower()
+        if os.path.isdir(p):
+            if low in LICENSE_DIRS:
+                found.extend(
+                    os.path.join(p, f)
+                    for f in sorted(os.listdir(p))
+                    if os.path.isfile(os.path.join(p, f))
+                )
+            continue
+        stem, ext = os.path.splitext(low)
+        if stem in LICENSE_STEMS and ext in LICENSE_EXTS:
             found.append(p)
     return found
 
@@ -84,6 +113,7 @@ def detect(text):
     for needle, label in (
         ("open bsv license version 6", "Open BSV License Version 6"),
         ("open bsv license version 5", "Open BSV License Version 5"),
+        ("open bsv license version 4", "Open BSV License Version 4"),
         ("apache license", "Apache License 2.0"),
         ("mit license", "MIT License"),
         ("isc license", "ISC License"),

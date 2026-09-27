@@ -38,17 +38,17 @@ of their respective licenses. Each dependency retains its own copyright;
 this notice does not modify those licenses.
 
   @bsv/gasp                                   Open BSV License Version 6
-  @bsv/overlay                                Open BSV License Version 6
   @bsv/sdk                                    Open BSV License Version 6
+  @lightwebinc/overlay                        Open BSV License Version 6
   knex                                        MIT License
   mysql2                                      MIT License
 
 Those five are the ones worth naming. They are not the whole set: the
 compiler does not bundle, so the production dependency tree is present
-in any image built here, and LICENSE-THIRD-PARTY reproduces all sixteen
-licenses verbatim. That file is generated from that tree rather than
-maintained by hand, which is how @bsv/gasp came to be missing from this
-list until it was: it arrives through @bsv/overlay, and a hand-written
+in any image built here, and LICENSE-THIRD-PARTY reproduces all
+thirty-two licenses verbatim. That file is generated from that tree rather
+than maintained by hand, which is how @bsv/gasp came to be missing from
+this list until it was: it arrives through the engine, and a hand-written
 list only ever holds what someone remembered to add.
 
 © BSV Association
