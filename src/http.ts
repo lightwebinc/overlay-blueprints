@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Engine } from '@lightwebinc/overlay'
 import type { Metrics } from './metrics.js'
+import { ingestProof, ProofResults } from './proofs.js'
 
 export interface HttpDeps {
   readonly engine: Engine
@@ -79,6 +80,9 @@ export function buildServer(d: HttpDeps): Server {
   d.metrics.preset('overlay_host_submits_total', { result: 'ok' })
   d.metrics.preset('overlay_host_submits_total', { result: 'malformed' })
   d.metrics.preset('overlay_host_submits_total', { result: 'error' })
+  // Preset so an alert on unverified or error proofs matches a series that
+  // exists before the first one arrives.
+  for (const result of ProofResults) d.metrics.preset('overlay_host_proof_ingests_total', { result })
   d.metrics.preset('overlay_host_gasp_served_total', { result: 'ok' })
   d.metrics.preset('overlay_host_gasp_served_total', { result: 'error' })
   d.metrics.preset('overlay_host_lookups_total', { result: 'ok' })
@@ -166,9 +170,22 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
       // admits NOTHING, so a counter incremented per requested topic on every
       // 200 and called "admissions" reports admissions that did not happen.
       for (const t of topics) d.metrics.inc('overlay_host_topic_submits_total', { topic: t })
+      let admitted = 0
       for (const [t, adm] of Object.entries(steak ?? {})) {
         const n = adm?.outputsToAdmit?.length ?? 0
+        admitted += n
         if (n > 0) d.metrics.inc('overlay_host_admissions_total', { topic: t }, n)
+      }
+      // A submission that admitted nothing may be a transaction this host
+      // already holds, now arriving with the proof it lacked. The engine
+      // drops that proof as part of its duplicate answer; ingestProof keeps
+      // it, after verifying it against this host's own headers.
+      if (admitted === 0) {
+        const result = await ingestProof(d.engine, [...body])
+        d.metrics.inc('overlay_host_proof_ingests_total', { result })
+        if (result === 'upgraded' || result === 'unverified' || result === 'error') {
+          d.log('proof on duplicate submission', { result, topics })
+        }
       }
       // Answer the BARE map, as the released TypeScript engine does. A client
       // that worked against that engine keeps working here.

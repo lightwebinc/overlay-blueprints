@@ -35,7 +35,7 @@ what belongs in its topic. The blueprint applications are separate.
 
 | Route | |
 | --- | --- |
-| `POST /submit` | BRC-22, at the ROOT, octet-stream body, `x-topics` in either wire form. Answers a bare STEAK |
+| `POST /submit` | BRC-22, at the ROOT, octet-stream body, `x-topics` in either wire form. Answers a bare STEAK. A transaction the host already holds unproven, resubmitted with its merkle path, has that path verified against this host's own headers and ingested (`overlay_host_proof_ingests_total{result}`) |
 | `POST /lookup` | BRC-24 |
 | `POST /admin/startGASPSync` | catch-up from explicitly configured peers, behind a bearer token. A no-op, reported as such, on a host with no peers configured |
 | `POST /requestSyncResponse` `POST /requestForeignGASPNode` | the peer side of catch-up, so another host can sync from this one |
