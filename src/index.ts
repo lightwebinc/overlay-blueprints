@@ -99,7 +99,10 @@ async function main(): Promise<void> {
     if (restorable.length === 0) continue
     const outputs: Output[] = []
     for (const t of Object.keys(module.topics ?? {})) {
-      outputs.push(...(await storage.findUTXOsForTopic(t)))
+      // With each row's BEEF: a module may read what a stored transaction
+      // spent (a sweep whose spent outputs this host never held) and not
+      // only what its script says.
+      outputs.push(...(await storage.findUTXOsForTopic(t, undefined, undefined, true)))
     }
     for (const [name, ls] of restorable) {
       // The real storage object goes through: a restore that must know who
