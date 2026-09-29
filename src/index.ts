@@ -11,7 +11,7 @@
  */
 import { loadConfig, ConfigError } from './config.js'
 import { openStorage } from './storage.js'
-import { BridgeChainTracker } from './chaintracker.js'
+import { chainTrackerFor } from './headersource.js'
 import { buildEngine, AssertionError, countingLogger } from './engine.js'
 import { AnyTxTopicManager } from './topics/anytx.js'
 import { AnyTxLookupService } from './lookup/anytx.js'
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   const { db, storage } = await openStorage(cfg.knexUrl)
   log('storage migrated')
 
-  const chainTracker = new BridgeChainTracker(cfg.chainTrackerUrl)
+  const chainTracker = chainTrackerFor(cfg.chainTrackerUrl, cfg.chainNetwork)
 
   // Created before the modules load, because a module presets and counts
   // through it from its factory onwards, and a second registry would be a

@@ -4,7 +4,10 @@
 # thing that was built unreproducible, and this host verifies transactions.
 FROM node@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
 WORKDIR /src
+# The engine is a vendored fork (vendor/overlay-fork), a file: dependency, so
+# the tarball has to be in the tree before npm ci reads the lock.
 COPY package.json package-lock.json ./
+COPY vendor ./vendor
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
@@ -14,6 +17,7 @@ FROM node@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
+COPY vendor ./vendor
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /src/dist ./dist
 

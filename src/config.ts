@@ -7,6 +7,8 @@
  * and never converged, so there is no fleet mechanism to inherit instead.
  */
 
+import { parseSource, type Network } from './headersource.js'
+
 export interface Config {
   /** HTTP listen address for submit, lookup, health and metrics. */
   readonly listen: string
@@ -14,11 +16,17 @@ export interface Config {
   /** knex connection string for the engine's own storage. */
   readonly knexUrl: string
   /**
-   * Base URL of the bridge's header read API, which is this host's chain
-   * tracker. There is no default on purpose: a default here would quietly
-   * send a host's verification questions to a third party.
+   * This host's chain tracker: a bridge's header read API URL, `woc:main`,
+   * `woc:test` or `chaintracks:URL` (see headersource.ts). There is no default
+   * on purpose: a default here would quietly send a host's verification
+   * questions to a third party.
    */
   readonly chainTrackerUrl: string
+  /**
+   * The network a WhatsOnChain or chaintracks source is checked against,
+   * which sets the proof-of-work floor. Unset, the source's own network.
+   */
+  readonly chainNetwork: Network | undefined
   /** Topic names this host mounts. */
   readonly topics: readonly string[]
   /**
@@ -70,6 +78,23 @@ function required(name: string): string {
     throw new ConfigError(`${name} is required (set it in the unit's EnvironmentFile)`)
   }
   return v.trim()
+}
+
+function parseTracker(spec: string): string {
+  try {
+    parseSource(spec)
+  } catch (e) {
+    throw new ConfigError(`OVERLAY_CHAIN_TRACKER_URL: ${(e as Error).message}`)
+  }
+  return spec
+}
+
+function parseNetwork(v: string): Network | undefined {
+  if (v === '') return undefined
+  if (v !== 'main' && v !== 'test' && v !== 'regtest') {
+    throw new ConfigError(`OVERLAY_CHAIN_NETWORK ${v} is not main, test or regtest`)
+  }
+  return v
 }
 
 function optional(name: string, fallback: string): string {
@@ -182,7 +207,8 @@ export function loadConfig(): Config {
     listen: optional('OVERLAY_LISTEN', '0.0.0.0'),
     port,
     knexUrl: required('OVERLAY_KNEX_URL'),
-    chainTrackerUrl: required('OVERLAY_CHAIN_TRACKER_URL'),
+    chainTrackerUrl: parseTracker(required('OVERLAY_CHAIN_TRACKER_URL')),
+    chainNetwork: parseNetwork(optional('OVERLAY_CHAIN_NETWORK', '')),
     topics,
     adminToken: required('OVERLAY_ADMIN_TOKEN'),
     syncPeers: parseSyncPeers(optional('OVERLAY_SYNC_PEERS', ''), topics),

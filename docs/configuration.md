@@ -8,7 +8,8 @@ never in a repository.
 | --- | --- | --- |
 | `OVERLAY_TOPICS` | none, required | Comma list of topic names to mount. The host mounts no topics without it |
 | `OVERLAY_KNEX_URL` | none, required | MySQL connection string for the engine's storage, for example `mysql://user:pass@host:3306/overlay`. MySQL only: the engine's migrations branch on the client, so a development host runs the same client a deployed one does |
-| `OVERLAY_CHAIN_TRACKER_URL` | none, required | The bridge's header read API. **Deliberately not defaulted**: a default would quietly send this host's verification questions to a third party |
+| `OVERLAY_CHAIN_TRACKER_URL` | none, required | The header source: a bridge's header read API URL, `woc:main` or `woc:test` (the public WhatsOnChain API), or `chaintracks:https://host/v2` (a chaintracks v2 service). Every header a WhatsOnChain or chaintracks source answers is hashed and must carry the work its bits claim, at or above the network floor on mainnet, so such a source cannot lie without mining a block. **Deliberately not defaulted**: a default would quietly send this host's verification questions to a third party |
+| `OVERLAY_CHAIN_NETWORK` | the source's own | `main`, `test` or `regtest`: the network a WhatsOnChain or chaintracks source is checked against. `main` requires a difficulty of at least 4e9; the others check each header against its own target |
 | `OVERLAY_ADMIN_TOKEN` | none, required | Bearer token for `/admin/*`. Not defaulted, because the admin surface can trigger catch-up and an unauthenticated one is not a thing to make easy to leave off |
 | `OVERLAY_LISTEN` | `0.0.0.0` | Listen address |
 | `OVERLAY_PORT` | `8080` | Listen port |

@@ -20,7 +20,9 @@ The released `@bsv/overlay` engine, assembled as a library, with:
   back to a public default.
 - **its chain tracker pointed at the bridge**, so every object it admits is
   verified against headers the host itself received from the same network
-  that delivered the object.
+  that delivered the object. A host with no bridge points it at WhatsOnChain
+  or a chaintracks service instead, and checks the proof of work of every
+  header those answer (see [configuration](docs/configuration.md)).
 - **`KnexStorage` on MySQL**, which ships inside the engine package. No
   storage backend is written here and none is forked.
 
