@@ -130,3 +130,27 @@ test('currentHeight per dialect', async () => {
     ct.close()
   }
 })
+
+test('a 429 is retried, and a proven root is reused rather than asked again', async () => {
+  let calls = 0
+  const body = fixture('woc-main-900000')
+  const srv: Server = createServer((req, res) => {
+    calls++
+    if (calls === 1) {
+      res.writeHead(429, { 'retry-after': '0' }).end()
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' }).end(body)
+  })
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r))
+  const { port } = srv.address() as AddressInfo
+  try {
+    const t = new HeaderSourceChainTracker({ kind: 'whatsonchain', base: `http://127.0.0.1:${port}`, network: 'main' }, 'main')
+    assert.equal(await t.isValidRootForHeight(ROOT_900000, 900000), true)
+    assert.equal(calls, 2)
+    assert.equal(await t.isValidRootForHeight('11'.repeat(32), 900000), false)
+    assert.equal(calls, 2)
+  } finally {
+    srv.close()
+  }
+})

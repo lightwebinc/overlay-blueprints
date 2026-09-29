@@ -21,6 +21,11 @@ export type Network = 'main' | 'test' | 'regtest'
 export const MAINNET_MIN_DIFFICULTY = 4_000_000_000n
 
 const WOC_BASE = 'https://api.whatsonchain.com/v1/bsv/'
+/** Retries of a 429 answer, with back-off from 500 ms, capped at 8 s each. */
+const RETRIES_429 = 4
+/** How long a proven root is reused, and how many are kept. */
+const ROOT_TTL_MS = 10 * 60_000
+const ROOT_CACHE_MAX = 10_000
 
 export class HeaderSourceError extends Error {}
 
@@ -151,15 +156,29 @@ export class HeaderSourceChainTracker implements ChainTracker {
     return this.network === 'main' ? MAINNET_MIN_DIFFICULTY : 0n
   }
 
+  /**
+   * One GET, retried with back-off when the service answers 429: a public
+   * header service rate-limits (WhatsOnChain's free tier allows a few
+   * requests a second), and a host that turned a busy answer into a refused
+   * submission would refuse good objects under load.
+   */
   private async get(path: string): Promise<{ status: number; body: unknown }> {
-    const ac = new AbortController()
-    const timer = setTimeout(() => ac.abort(), this.timeoutMs)
-    try {
-      const res = await fetch(this.src.base + path, { headers: { Accept: 'application/json' }, signal: ac.signal })
-      if (res.status !== 200) return { status: res.status, body: undefined }
-      return { status: 200, body: await res.json() }
-    } finally {
-      clearTimeout(timer)
+    for (let attempt = 0; ; attempt++) {
+      const ac = new AbortController()
+      const timer = setTimeout(() => ac.abort(), this.timeoutMs)
+      let status: number
+      let retryAfter: string | null = null
+      try {
+        const res = await fetch(this.src.base + path, { headers: { Accept: 'application/json' }, signal: ac.signal })
+        if (res.status === 200) return { status: 200, body: await res.json() }
+        status = res.status
+        retryAfter = res.headers.get('retry-after')
+      } finally {
+        clearTimeout(timer)
+      }
+      if (status !== 429 || attempt >= RETRIES_429) return { status, body: undefined }
+      const wait = Math.min(Number(retryAfter) * 1000 || 500 * 2 ** attempt, 8_000)
+      await new Promise((r) => setTimeout(r, wait))
     }
   }
 
@@ -176,12 +195,25 @@ export class HeaderSourceChainTracker implements ChainTracker {
     return env.value
   }
 
+  /**
+   * Roots already proven by their header's work, by height, for a while: one
+   * object's ancestry often names the same block several times, and a busy
+   * host would otherwise ask again for each. Kept briefly, not forever, so a
+   * reorganised tip is re-read.
+   */
+  private readonly roots = new Map<number, { root: string; at: number }>()
+
   async isValidRootForHeight(root: string, height: number): Promise<boolean> {
+    const hit = this.roots.get(height)
+    if (hit !== undefined && Date.now() - hit.at < ROOT_TTL_MS) return hit.root === root.toLowerCase()
     const h = await this.header(height)
     if (h === undefined) return false
     // The work is checked before the root is compared, so a forged header
     // throws even when its root is the one the caller hoped for.
-    return checkHeader(h, height, this.minDifficulty()) === root.toLowerCase()
+    const proven = checkHeader(h, height, this.minDifficulty())
+    if (this.roots.size >= ROOT_CACHE_MAX) this.roots.clear()
+    this.roots.set(height, { root: proven, at: Date.now() })
+    return proven === root.toLowerCase()
   }
 
   async currentHeight(): Promise<number> {
