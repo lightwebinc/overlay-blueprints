@@ -4,7 +4,7 @@ import { Transaction } from '@bsv/sdk'
 /**
  * `tm_anytx` admits every output of every object it is given.
  *
- * This is the phase-0 topic manager, and it is deliberately trivial. The thing
+ * This is the host's default topic manager, and it is deliberately trivial. The thing
  * it exists to serve is the parity oracle: a fixed object set is submitted to
  * two hosts and their lookup answers are compared, and the comparison is only
  * meaningful if the two hosts cannot disagree for any reason other than the

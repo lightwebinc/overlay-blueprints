@@ -27,7 +27,7 @@ Run with the engine's own `KnexStorage` on MySQL and the chain tracker pointed
 at a bridge's header API. Established:
 
 - `/submit` admits under both `x-topics` wire forms, answers a bare STEAK, and
-  recognises a duplicate itself; an unmounted topic or a missing header is a
+  recognizes a duplicate itself; an unmounted topic or a missing header is a
   400, not a silent no-op.
 - A duplicate that carries a merkle path the host lacked upgrades the stored
   copy, and only after the path verifies against this host's own chain

@@ -142,7 +142,7 @@ OVERLAY_CHAIN_TRACKER_URL=http://your-bridge:9178 docker compose up --build
 
 The chain tracker URL is the one value compose cannot invent, for the reason
 in the table above, so it is passed in rather than defaulted. Without it
-compose aborts before starting anything, which is the intended behaviour and
+compose aborts before starting anything, which is the intended behavior and
 not a broken file.
 
 ## Running a stock server instead

@@ -200,8 +200,8 @@ test('a topic with no configured peers is false, which the engine skips outright
 // startGASPSync catches every per-peer error and carries on, so its return
 // says nothing about whether a peer answered. Counting the engine's error
 // calls is the only way the host can tell, and without it a catch-up that
-// recovered nothing answers 200 — which is exactly what happened the first
-// time this was run against a peer serving no GASP routes.
+// recovered nothing answers 200, for example against a peer serving no GASP
+// routes.
 test('the counting logger reads back failures the engine swallows', () => {
   const quiet = { log() {}, info() {}, warn() {}, debug() {}, error() {} } as unknown as typeof console
   const l = countingLogger(quiet)
@@ -348,7 +348,7 @@ test('ls_anytx pages {all:true} and the walk is stable under mid-walk admission'
     const last = page[page.length - 1]
     after = `${last?.txid}.${last?.outputIndex}`
     // Admit a row BEHIND the cursor mid-walk. Under offset pagination this
-    // shifts every later row and the walk silently repeats one and skips one —
+    // shifts every later row and the walk silently repeats one and skips one;
     // in a parity oracle that is indistinguishable from real divergence.
     if (seen.length === AnyTxLookupService.PAGE) {
       ls.outputAdmittedByTopic({

@@ -1,7 +1,19 @@
 # overlay-blueprints
 
+[![CI](https://github.com/lightwebinc/overlay-blueprints/actions/workflows/ci.yml/badge.svg)](https://github.com/lightwebinc/overlay-blueprints/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/lightwebinc/overlay-blueprints)](https://github.com/lightwebinc/overlay-blueprints/releases)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+> [!WARNING]
+> **Experimental software.** overlay-blueprints is the reference overlay host used by
+> [bstack](https://github.com/lightwebinc/bstack) applications on
+> [BSV Layered Multicast](https://github.com/lightwebinc/bsv-multicast).
+> It is published to be built on and improved. Interfaces, formats and behavior may change
+> rapidly between releases; pin an exact version.
+
 A reference overlay services host that takes the BEEF object plane as its
-transport, and the applications built on it.
+transport. It carries no application: applications are host-side modules
+loaded at startup (`OVERLAY_MODULES`), and their images build on this one.
 
 ```text
    fabric ══push══▶ overlay-bridge ──▶ POST /submit ──▶ this host
@@ -11,7 +23,8 @@ transport, and the applications built on it.
 
 ## What it is
 
-The released `@bsv/overlay` engine, assembled as a library, with:
+The released `@bsv/overlay` engine (2.3.1, carried as a one-change fork: see
+[FORK.md](vendor/overlay-fork/FORK.md)), assembled as a library, with:
 
 - **no advertiser**, so the engine admits and indexes and never propagates.
   The plane is the propagation. This is the quiet posture: the engine skips
@@ -28,10 +41,10 @@ The released `@bsv/overlay` engine, assembled as a library, with:
 
 ## What it is not
 
-It is not a product and not a template for a real overlay. `tm_anytx` admits
+It is not an application and not a template for one. `tm_anytx` admits
 every output and decides nothing, because its job is to make two hosts
 comparable rather than to model an application. A real topic manager decides
-what belongs in its topic. The blueprint applications are separate.
+what belongs in its topic. Applications are separate repositories that load into this host as modules.
 
 ## Surface
 
@@ -53,10 +66,39 @@ What the tests and the live runs established is in
 Catch-up peers, if any, are named explicitly in `OVERLAY_SYNC_PEERS`. The
 engine would also accept `SHIP`, which resolves peers through the public
 discovery overlays; this host does not offer it, because reaching those to
-find a peer is the outbound behaviour the no-advertiser posture exists to
+find a peer is the outbound behavior the no-advertiser posture exists to
 remove.
 
-## Licence
+## Install and run
 
-Apache-2.0 (see `LICENSE`). Dependencies and the attribution their licences
-require are in `NOTICE`.
+The image is `ghcr.io/lightwebinc/overlay-blueprints:<version>` (linux/amd64
+and linux/arm64). It needs a MySQL database and a header source. With no
+bridge, use the public WhatsOnChain API, whose every header is checked for
+proof of work:
+
+```sh
+docker run --rm -p 8080:8080 \
+  -e OVERLAY_TOPICS=tm_anytx \
+  -e OVERLAY_KNEX_URL=mysql://overlay:secret@db.example:3306/overlay \
+  -e OVERLAY_CHAIN_TRACKER_URL=woc:main \
+  -e OVERLAY_ADMIN_TOKEN=change-me \
+  ghcr.io/lightwebinc/overlay-blueprints:0.2.3
+```
+
+From source (Node 24): `npm ci && npm run build && npm start`. More in
+[docs/examples.md](docs/examples.md).
+
+## Documentation
+
+| Document | |
+| --- | --- |
+| [docs/architecture.md](docs/architecture.md) | components, request flow, what the host does and does not do |
+| [docs/configuration.md](docs/configuration.md) | every environment variable, startup assertions, the module contract |
+| [docs/examples.md](docs/examples.md) | running, submitting, looking up, catch-up, building an application image |
+| [docs/verification.md](docs/verification.md) | what the tests and live runs establish, and their limits |
+| [vendor/overlay-fork/FORK.md](vendor/overlay-fork/FORK.md) | the one change made to the overlay engine |
+
+## License
+
+Apache-2.0 (see `LICENSE`). Dependencies and the attribution their licenses
+require are in `NOTICE` and `LICENSE-THIRD-PARTY`.

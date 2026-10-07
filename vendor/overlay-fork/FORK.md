@@ -3,8 +3,8 @@
 This package is a fork of **`@bsv/overlay` version 2.3.1**, taken from
 `bsv-blockchain/ts-stack` at commit `888025a82dcb85f7be9ce091d1075422339fa3cd`
 (2026-08-27). It is redistributed under the **Open BSV License Version 6**, the
-licence of the original, whose full text is carried verbatim in `LICENSE.txt`
-alongside this file. Copyright in the original work remains with
+license of the original, whose full text is carried verbatim in `LICENSE.txt`
+inside the package tarball. Copyright in the original work remains with
 © BSV Association.
 
 ## What was modified

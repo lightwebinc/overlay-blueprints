@@ -129,14 +129,9 @@ export class AnyTxLookupService implements LookupService {
    * hosts produce byte-comparable answers rather than answers that agree as
    * sets and differ as lists.
    *
-   * IT IS PAGED, and that is a correction rather than a feature. This used to
-   * return the whole index, on the assumption written here that "the index is
-   * the fixed phase-0 object set". That assumption expired: a host running for
-   * an afternoon holds tens of thousands of outputs, and the unpaged answer
-   * failed twice over - first against the engine's own 1000-result hydration
-   * cap, and then, with that cap lifted, against a 64 MiB response bound at
-   * 33,093 outputs. The acceptance gate that compares two hosts was therefore
-   * unevaluable on exactly the hosts it exists to compare.
+   * IT IS PAGED. An unpaged answer does not scale: a host running for
+   * an afternoon holds tens of thousands of outputs, which exceeds both the
+   * engine's 1000-result hydration cap and a 64 MiB response bound.
    *
    * Pagination is KEYSET, not offset. An offset walk over an index that is
    * still admitting silently skips and repeats rows, which in a parity oracle
