@@ -95,8 +95,11 @@ From source (Node 24): `npm ci && npm run build && npm start`. More in
 | [docs/architecture.md](docs/architecture.md) | components, request flow, what the host does and does not do |
 | [docs/configuration.md](docs/configuration.md) | every environment variable, startup assertions, the module contract |
 | [docs/examples.md](docs/examples.md) | running, submitting, looking up, catch-up, building an application image |
+| [docs/references/prometheusMetrics.md](docs/references/prometheusMetrics.md) | every `overlay_host_*` series, its labels and meaning |
 | [docs/verification.md](docs/verification.md) | what the tests and live runs establish, and their limits |
 | [vendor/overlay-fork/FORK.md](vendor/overlay-fork/FORK.md) | the one change made to the overlay engine |
+
+Releases and notes live on [GitHub Releases](https://github.com/lightwebinc/overlay-blueprints/releases); there is no CHANGELOG.
 
 ## License
 
