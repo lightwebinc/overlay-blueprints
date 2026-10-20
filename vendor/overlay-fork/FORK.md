@@ -9,7 +9,9 @@ inside the package tarball. Copyright in the original work remains with
 
 ## What was modified
 
-One change, in `src/Engine.ts`:
+Two changes, both in `src/Engine.ts`, applied in this order by `rebuild.sh`.
+
+### 1. `onTopicFailed` (onTopicFailed.patch)
 
 - an exported `TopicFailureReporter` type,
 - an optional public field `Engine.onTopicFailed`,
@@ -20,7 +22,21 @@ Nothing else is altered. No wire format changes, no STEAK shape changes, no
 constructor parameter is added or moved, and an engine that never sets
 `onTopicFailed` behaves exactly as upstream.
 
-## Why
+### 2. Atomic BEEF built once per transaction (atomicBEEFOnce.patch)
+
+Admission called `tx.toAtomicBEEF()` once per lookup service per admitted
+output, and again for storage compaction and spend notifications, each call
+re-walking and re-hashing the whole BEEF. A host with seven mounted modules
+spent ~15% of its engine CPU rebuilding the same bytes (measured with
+`node --cpu-prof` at its admission ceiling). The engine now keeps a `WeakMap`
+from the `Transaction` to its serialized Atomic BEEF, so each transaction is
+serialized once; an entry dies with the transaction and is rebuilt if the
+transaction's `merklePath` changes. Lookup services receive the same array, and
+must treat it as read-only (upstream's own services only parse it). The bytes
+are identical to upstream's; only the number of times they are computed
+changes.
+
+## Why the onTopicFailed hook
 
 `submit` catches every per-topic validation error into a local `failedTopics`
 set and still returns `{outputsToAdmit: [], coinsToRetain: []}` for that topic

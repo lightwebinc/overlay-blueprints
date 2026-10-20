@@ -20,8 +20,10 @@ tar xzf src.tar.gz --wildcards "*/packages/overlays/overlay/*" "*/config/typescr
 ROOT="$(find . -maxdepth 1 -type d -name 'bsv-blockchain-ts-stack-*' | head -1)"
 PKG="$ROOT/packages/overlays/overlay"
 
-echo "== applying the patch"
-patch -p1 -d "$PKG" < "$HERE/onTopicFailed.patch"
+echo "== applying the patches, in order"
+for p in onTopicFailed.patch atomicBEEFOnce.patch; do
+	patch -p1 -d "$PKG" < "$HERE/$p"
+done
 cp "$HERE/FORK.md" "$PKG/FORK.md"
 
 echo "== renaming, and pinning the workspace: deps that cannot resolve outside the monorepo"

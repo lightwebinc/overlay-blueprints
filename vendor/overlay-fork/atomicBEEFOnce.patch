@@ -1,0 +1,93 @@
+--- a/src/Engine.ts	2026-10-20 00:05:32.382274835 -0600
++++ b/src/Engine.ts	2026-10-20 00:05:32.414572874 -0600
+@@ -152,6 +152,18 @@
+   onTopicFailed?: TopicFailureReporter
+ 
+   /**
++   * Atomic BEEF of each transaction in flight, serialized once. Admission used
++   * to call tx.toAtomicBEEF() once per lookup service per admitted output (and
++   * again for storage and spend notifications), re-walking and re-hashing the
++   * whole BEEF each time: with seven mounted modules that was ~15% of a lab
++   * host's engine CPU spent rebuilding bytes it already had. Keyed by the
++   * Transaction object, so an entry dies with it; the merklePath it was built
++   * from is kept, and a transaction that gains a proof is serialized afresh.
++   * The array is shared, so a lookup service must treat it as read-only.
++   */
++  private readonly atomicBEEFCache = new WeakMap<Transaction, { merklePath: unknown, beef: number[] }>()
++
++  /**
+    * Creates a new Overlay Services Engine
+    * @param {[key: string]: TopicManager} managers - manages topic admittance
+    * @param {[key: string]: LookupService} lookupServices - manages UTXO lookups
+@@ -266,8 +278,16 @@
+     }
+   }
+ 
++  private atomicBEEFOf(tx: Transaction): number[] {
++    const hit = this.atomicBEEFCache.get(tx)
++    if (hit !== undefined && hit.merklePath === tx.merklePath) return hit.beef
++    const beef = tx.toAtomicBEEF()
++    this.atomicBEEFCache.set(tx, { merklePath: tx.merklePath, beef })
++    return beef
++  }
++
+   private compactBEEFForStorage(tx: Transaction, originalBEEF: number[]): number[] {
+-    return tx.merklePath === undefined ? originalBEEF : tx.toAtomicBEEF()
++    return tx.merklePath === undefined ? originalBEEF : this.atomicBEEFOf(tx)
+   }
+ 
+   private async recordTransactionData(tx: Transaction, beef: number[], blockHash?: string): Promise<void> {
+@@ -754,7 +774,7 @@
+     if (lookupService.spendNotificationMode === 'whole-tx') {
+       await lookupService.outputSpent({
+         mode: 'whole-tx',
+-        spendingAtomicBEEF: tx.toAtomicBEEF(),
++        spendingAtomicBEEF: this.atomicBEEFOf(tx),
+         txid: output.txid,
+         outputIndex: output.outputIndex,
+         topic,
+@@ -892,7 +912,7 @@
+     }
+     await lookupService.outputAdmittedByTopic({
+       mode: 'whole-tx',
+-      atomicBEEF: tx.toAtomicBEEF(),
++      atomicBEEF: this.atomicBEEFOf(tx),
+       outputIndex,
+       topic,
+       offChainValues
+--- a/src/__tests/Engine.test.ts	2026-10-20 00:05:59.686344914 -0600
++++ b/src/__tests/Engine.test.ts	2026-10-20 00:05:59.718042022 -0600
+@@ -2010,6 +2010,33 @@
+       expect(deleteUTXODeep).not.toHaveBeenCalled()
+     })
+ 
++    it('serializes a transaction to atomic BEEF once for every whole-tx service and output', async () => {
++      const engine = makeEngine()
++      const tx = Transaction.fromBEEF(exampleBeef)
++      const toAtomic = jest.spyOn(tx, 'toAtomicBEEF')
++      const a = jest.fn()
++      const b = jest.fn()
++      for (const svc of [a, b]) {
++        for (const outputIndex of [0, 0]) {
++          await (engine as any).notifyOutputAdmitted(
++            { ...mockLookupService, admissionMode: 'whole-tx', outputAdmittedByTopic: svc },
++            tx, exampleTXID, outputIndex, 'Hello'
++          )
++        }
++      }
++      expect(toAtomic).toHaveBeenCalledTimes(1)
++      const first = a.mock.calls[0][0].atomicBEEF
++      expect(b.mock.calls[0][0].atomicBEEF).toEqual(first)
++      expect(Transaction.fromAtomicBEEF(first).id('hex')).toEqual(tx.id('hex'))
++
++      // A proof attached later must not be served from the stale entry.
++      tx.merklePath = undefined
++      ;(tx as any).merklePath = { ...(tx.merklePath ?? {}), changed: true }
++      ;(engine as any).atomicBEEFCache.set(tx, { merklePath: 'stale', beef: [0] })
++      toAtomic.mockReturnValueOnce([9, 9])
++      expect((engine as any).atomicBEEFOf(tx)).toEqual([9, 9])
++    })
++
+     it('preserves whole-transaction admission and incomplete-output no-ops', async () => {
+       const outputAdmittedByTopic = jest.fn()
+       const engine = makeEngine()
