@@ -23,6 +23,9 @@ import { loadModules, mountModules, ModuleRoutes, type ModuleHost } from './modu
 import { unspentOutputs } from './restore.js'
 import { KnexProofIndex, watchReorgs, type ReorgEvent } from './reorg.js'
 import { VerifyPool, defaultWorkers } from './verifypool.js'
+
+/** Script verification buckets, 0.1 ms to 100 ms: the target is under 1 ms. */
+const VERIFY_BUCKETS = [0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1]
 import type { Engine, TopicManager, LookupService, Output } from '@lightwebinc/overlay'
 
 function log(msg: string, extra: Record<string, unknown> = {}): void {
@@ -69,8 +72,10 @@ async function main(): Promise<void> {
 
   // Script verification on worker threads, before anything can verify.
   const workers = cfg.verifyWorkers ?? defaultWorkers()
-  const pool = workers > 0 ? new VerifyPool(workers) : undefined
-  pool?.install()
+  // With no workers the pool runs the same interpreter inline, so every
+  // verification is timed and counted whichever path it takes.
+  const pool = new VerifyPool(workers)
+  pool.install()
   log('script verification', { workers: workers === 0 ? 'inline' : workers })
 
   // Created before the modules load, because a module presets and counts
@@ -237,9 +242,19 @@ async function main(): Promise<void> {
   recountTimer.unref()
   metrics.gauge('overlay_host_indexed_outputs', () => index.size)
   metrics.gauge('overlay_host_ready', () => (lastReady ? 1 : 0))
-  metrics.gauge('overlay_host_verify_workers', () => pool?.size ?? 0)
-  metrics.gauge('overlay_host_verify_in_flight', () => pool?.inFlight ?? 0)
-  metrics.gauge('overlay_host_verified_in_workers_total', () => pool?.verified ?? 0)
+  metrics.gauge('overlay_host_verify_workers', () => pool.size)
+  metrics.gauge('overlay_host_verify_in_flight', () => pool.inFlight)
+  // Kept for the dashboards that read it; worker-path verifications only.
+  metrics.counter('overlay_host_verified_in_workers_total', () => (pool.size > 0 ? pool.verified : 0))
+  // End to end per script verification, queueing in the pool included.
+  for (const result of ['ok', 'refused', 'error']) {
+    metrics.histogram('overlay_host_verify_duration_seconds', { path: pool.path, result }, VERIFY_BUCKETS)
+  }
+  metrics.preset('overlay_host_verify_refused_total', { path: pool.path })
+  pool.onVerified = (seconds, result, path) => {
+    metrics.observe('overlay_host_verify_duration_seconds', { path, result }, seconds)
+    if (result === 'refused') metrics.inc('overlay_host_verify_refused_total', { path })
+  }
 
   // The reorg watch: blocks this host holds proofs in that left the best
   // chain demote those admissions and are told to the modules.
@@ -294,7 +309,7 @@ async function main(): Promise<void> {
       server.close(() => {
         // A query still in flight is aborted by the destroy, and that is not
         // a reason to keep the process up.
-        void Promise.allSettled([db.destroy(), pool?.close()]).then(() => process.exit(0))
+        void Promise.allSettled([db.destroy(), pool.close()]).then(() => process.exit(0))
       })
       server.closeIdleConnections()
     })

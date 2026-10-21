@@ -27,7 +27,10 @@ import {
   type ScriptVerificationBackend,
   type Spend,
 } from '@bsv/sdk'
-import type { VerifyAnswer, VerifyJob } from './verifyworker.js'
+import { verifyScripts, type VerifyAnswer, type VerifyJob } from './verifyworker.js'
+
+/** How one script verification ended: a verdict either way, or a fault. */
+export type VerifyResult = 'ok' | 'refused' | 'error'
 
 /**
  * The default pool: two workers, or one on a two-core machine, none on one.
@@ -56,6 +59,21 @@ export class VerifyPool {
   /** Transactions verified in workers, and how many were refused. */
   verified = 0
   refused = 0
+
+  /**
+   * Told of every verification this pool answers, with its end-to-end time
+   * in seconds (queueing in the pool included) and where it ran. A pool of
+   * size 0 runs the same interpreter inline, on the calling thread.
+   */
+  onVerified: ((seconds: number, result: VerifyResult, path: 'worker' | 'inline') => void) | undefined
+
+  get path(): 'worker' | 'inline' {
+    return this.size > 0 ? 'worker' : 'inline'
+  }
+
+  private observe(start: bigint, result: VerifyResult): void {
+    this.onVerified?.(Number(process.hrtime.bigint() - start) / 1e9, result, this.path)
+  }
 
   constructor(readonly size: number) {
     const url = new URL('./verifyworker.js', import.meta.url)
@@ -96,21 +114,49 @@ export class VerifyPool {
 
   /** Verifies every input script of a transaction whose inputs carry their sources. */
   run(params: BdkVerifyScriptsParams): Promise<boolean> {
+    const start = process.hrtime.bigint()
+    let job: VerifyJob
+    try {
+      job = this.job(params)
+    } catch (err) {
+      this.observe(start, 'error')
+      return Promise.reject(err as Error)
+    }
+    if (this.size === 0) {
+      const a = verifyScripts(job)
+      this.verified++
+      if (!a.valid) this.refused++
+      this.observe(start, a.valid ? 'ok' : 'refused')
+      return Promise.resolve(a.valid)
+    }
+    // The least loaded worker; ties go to the lowest index.
+    let w = 0
+    for (let i = 1; i < this.workers.length; i++) if ((this.load[i] ?? 0) < (this.load[w] ?? 0)) w = i
+    this.load[w] = (this.load[w] ?? 0) + 1
+    return new Promise<boolean>((resolve, reject) => {
+      this.pending.set(job.id, {
+        resolve: (v) => {
+          this.observe(start, v ? 'ok' : 'refused')
+          resolve(v)
+        },
+        reject: (e) => {
+          this.observe(start, 'error')
+          reject(e)
+        },
+        worker: w,
+      })
+      this.workers[w]!.postMessage(job)
+    })
+  }
+
+  private job(params: BdkVerifyScriptsParams): VerifyJob {
     const tx = params.tx
     const sources = tx.inputs.map((input) => {
       const out = input.sourceTransaction?.outputs[input.sourceOutputIndex]
       if (out === undefined) throw new Error('an input has no source output')
       return { satoshis: out.satoshis ?? 0, lockingScript: out.lockingScript.toUint8Array() }
     })
-    const job: VerifyJob = { id: this.nextId++, raw: tx.toUint8Array(), sources }
-    // The least loaded worker; ties go to the lowest index.
-    let w = 0
-    for (let i = 1; i < this.workers.length; i++) if ((this.load[i] ?? 0) < (this.load[w] ?? 0)) w = i
-    this.load[w] = (this.load[w] ?? 0) + 1
-    return new Promise<boolean>((resolve, reject) => {
-      this.pending.set(job.id, { resolve, reject, worker: w })
-      this.workers[w]!.postMessage(job)
-    })
+    return { id: this.nextId++, raw: tx.toUint8Array(), sources }
   }
 
   /** Jobs sent and not yet answered. */

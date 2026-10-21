@@ -11,6 +11,11 @@
 export class Metrics {
   private readonly counters = new Map<string, number>()
   private readonly gauges = new Map<string, () => number>()
+  private readonly types = new Map<string, 'counter' | 'gauge' | 'histogram'>()
+  private readonly histograms = new Map<
+    string,
+    { name: string; labels: Record<string, string>; bounds: readonly number[]; counts: number[]; sum: number; count: number }
+  >()
 
   private static key(name: string, labels: Record<string, string> = {}): string {
     const l = Object.entries(labels)
@@ -44,6 +49,33 @@ export class Metrics {
     this.gauges.set(Metrics.key(name), read)
   }
 
+  /** Register a counter read at scrape time: a gauge rendered with TYPE counter. */
+  counter(name: string, read: () => number): void {
+    this.gauges.set(Metrics.key(name), read)
+    this.types.set(name, 'counter')
+  }
+
+  /**
+   * Create a histogram series with these upper bounds (seconds, ascending).
+   * Called once per label set at startup, so every bucket exists at zero
+   * before the first observation and the label set stays bounded.
+   */
+  histogram(name: string, labels: Record<string, string>, bounds: readonly number[]): void {
+    const k = Metrics.key(name, labels)
+    if (this.histograms.has(k)) return
+    this.histograms.set(k, { name, labels, bounds, counts: bounds.map(() => 0), sum: 0, count: 0 })
+    this.types.set(name, 'histogram')
+  }
+
+  /** Record one observation; a series never created by histogram() is ignored. */
+  observe(name: string, labels: Record<string, string>, value: number): void {
+    const h = this.histograms.get(Metrics.key(name, labels))
+    if (h === undefined) return
+    for (let i = 0; i < h.bounds.length; i++) if (value <= h.bounds[i]!) h.counts[i]!++
+    h.sum += value
+    h.count++
+  }
+
   /**
    * Pre-create a series at zero. A counter that is absent until its first
    * event matches nothing in a rate() and reads identically to healthy, which
@@ -56,13 +88,31 @@ export class Metrics {
 
   render(): string {
     const lines: string[] = []
+    const typed = new Set<string>()
+    const type = (k: string): void => {
+      const name = k.split('{')[0]!
+      const t = this.types.get(name)
+      if (t !== undefined && !typed.has(name)) {
+        typed.add(name)
+        lines.push(`# TYPE ${name} ${t}`)
+      }
+    }
     for (const [k, v] of [...this.counters.entries()].sort()) lines.push(`${k} ${v}`)
     for (const [k, read] of [...this.gauges.entries()].sort()) {
       try {
-        lines.push(`${k} ${read()}`)
+        const v = read()
+        type(k)
+        lines.push(`${k} ${v}`)
       } catch {
         // A gauge that cannot be read is omitted rather than rendered wrong.
       }
+    }
+    for (const [k, h] of [...this.histograms.entries()].sort()) {
+      type(k)
+      h.bounds.forEach((b, i) => lines.push(`${Metrics.key(`${h.name}_bucket`, { ...h.labels, le: String(b) })} ${h.counts[i]}`))
+      lines.push(`${Metrics.key(`${h.name}_bucket`, { ...h.labels, le: '+Inf' })} ${h.count}`)
+      lines.push(`${Metrics.key(`${h.name}_sum`, h.labels)} ${h.sum}`)
+      lines.push(`${Metrics.key(`${h.name}_count`, h.labels)} ${h.count}`)
     }
     return lines.join('\n') + '\n'
   }

@@ -187,6 +187,24 @@ test('metrics preset a series at zero so an alert can match it', () => {
   assert.match(m.render(), /overlay_host_submits_total\{result="ok"\} 1/)
 })
 
+test('metrics render a histogram with cumulative buckets and typed counters', () => {
+  const m = new Metrics()
+  m.histogram('h_seconds', { result: 'ok' }, [0.001, 0.01])
+  m.observe('h_seconds', { result: 'ok' }, 0.0005)
+  m.observe('h_seconds', { result: 'ok' }, 0.005)
+  m.observe('h_seconds', { result: 'ok' }, 1)
+  m.observe('h_seconds', { result: 'unknown' }, 1)
+  m.counter('c_total', () => 7)
+  const out = m.render()
+  assert.match(out, /# TYPE h_seconds histogram/)
+  assert.match(out, /h_seconds_bucket\{le="0\.001",result="ok"\} 1/)
+  assert.match(out, /h_seconds_bucket\{le="0\.01",result="ok"\} 2/)
+  assert.match(out, /h_seconds_bucket\{le="\+Inf",result="ok"\} 3/)
+  assert.match(out, /h_seconds_count\{result="ok"\} 3/)
+  assert.doesNotMatch(out, /unknown/, 'an uncreated label set is not a new series')
+  assert.match(out, /# TYPE c_total counter\nc_total 7/)
+})
+
 // A peer list that silently dropped a malformed entry would leave a host
 // syncing with fewer peers than its operator configured, and the only symptom
 // would be data that never arrives.

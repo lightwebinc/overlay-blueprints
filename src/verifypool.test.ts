@@ -54,3 +54,26 @@ test('verification through the worker pool reaches the inline verdict', async ()
   // Closed, the backend is gone and verification is inline again.
   assert.deepEqual(await Promise.all(cases.map(async (c) => await verdict(c.beef, c.tracker))), inline)
 })
+
+test('every verification is timed, worker and inline, by result', async () => {
+  const k = PrivateKey.fromRandom()
+  const good = await spend(k, k)
+  const bad = await spend(k, PrivateKey.fromRandom())
+  for (const size of [2, 0]) {
+    const pool = new VerifyPool(size)
+    const seen: Array<[number, string, string]> = []
+    pool.onVerified = (s, r, p) => seen.push([s, r, p])
+    pool.install()
+    try {
+      assert.equal(await verdict(good.beef, good.tracker), true)
+      assert.equal(await verdict(bad.beef, bad.tracker), false)
+    } finally {
+      await pool.close()
+    }
+    const path = size > 0 ? 'worker' : 'inline'
+    assert.deepEqual(seen.map(([, r, p]) => [r, p]), [['ok', path], ['refused', path]])
+    for (const [s] of seen) assert.ok(s > 0 && s < 5, `a plausible duration: ${s}`)
+    assert.equal(pool.verified, 2)
+    assert.equal(pool.refused, 1)
+  }
+})
