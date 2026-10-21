@@ -47,7 +47,16 @@ export function installedVersions(): Record<string, string> {
   // which means the version alone cannot tell an operator whether a host is on
   // the fork or on upstream - and that is exactly the question this metric
   // exists to answer.
+  // The host's own release, from the package.json beside dist/.
+  let version = 'unknown'
+  try {
+    const j = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version?: string }
+    if (typeof j.version === 'string') version = j.version
+  } catch {
+    // reported as unknown, never a reason not to boot
+  }
   return {
+    version,
     overlay_pkg: '@lightwebinc/overlay',
     overlay: read('@lightwebinc/overlay'),
     sdk: read('@bsv/sdk'),

@@ -18,7 +18,7 @@ zero so an absent event still matches in `rate()`.
 
 | Name | Type | Labels | Meaning |
 |------|------|--------|---------|
-| `overlay_host_build_info` | Info | `overlay_pkg`, `overlay`, `sdk`, `gasp`, `node` | Installed engine package and version, `@bsv/sdk`, `@bsv/gasp` and Node versions. |
+| `overlay_host_build_info` | Info | `version` (this host's release), `overlay_pkg`, `overlay`, `sdk`, `gasp`, `node` | Installed engine package and version, `@bsv/sdk`, `@bsv/gasp` and Node versions. |
 | `overlay_host_ready` | Gauge | none | 1 when the last readiness check (storage and chain tracker) passed. |
 | `overlay_host_indexed_outputs` | Gauge | none | Unspent output rows on the configured topics, counted from storage once a minute (an outpoint held on two topics counts twice). |
 | `overlay_host_submits_total` | Counter | `result` = `ok`, `malformed`, `error` | `POST /submit` requests. |
