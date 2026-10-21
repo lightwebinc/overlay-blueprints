@@ -81,6 +81,14 @@ export interface Config {
    * machine, none on one). See src/verifypool.ts.
    */
   readonly verifyWorkers: number | undefined
+  /**
+   * Honour the overlay bridge's SPV marker: skip SCRIPT verification for an
+   * object the bridge on this machine verified and marked. Off by default.
+   * See src/bridgetrust.ts for the trust boundary.
+   */
+  readonly trustBridgeVerify: boolean
+  /** The marker key file, shared with the bridge; required when trust is on. */
+  readonly bridgeMarkerKeyFile: string | undefined
 }
 
 class ConfigError extends Error {}
@@ -242,7 +250,20 @@ export function loadConfig(): Config {
     reorgDepth: count('OVERLAY_REORG_DEPTH', 10, 1000) as number,
     reorgPollSeconds: Math.max(1, count('OVERLAY_REORG_POLL_SECONDS', 30, 86400) as number),
     verifyWorkers: count('OVERLAY_VERIFY_WORKERS', undefined, 256),
+    ...bridgeTrust(),
   }
+}
+
+function bridgeTrust(): { trustBridgeVerify: boolean; bridgeMarkerKeyFile: string | undefined } {
+  const raw = optional('OVERLAY_TRUST_BRIDGE_VERIFY', 'false')
+  if (raw !== 'true' && raw !== 'false') {
+    throw new ConfigError(`OVERLAY_TRUST_BRIDGE_VERIFY ${raw} is not true or false`)
+  }
+  const file = optional('OVERLAY_BRIDGE_MARKER_KEY_FILE', '')
+  if (raw === 'true' && file === '') {
+    throw new ConfigError('OVERLAY_TRUST_BRIDGE_VERIFY is true but OVERLAY_BRIDGE_MARKER_KEY_FILE is unset')
+  }
+  return { trustBridgeVerify: raw === 'true', bridgeMarkerKeyFile: file === '' ? undefined : file }
 }
 
 export { ConfigError }

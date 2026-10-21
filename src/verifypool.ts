@@ -33,6 +33,13 @@ import { verifyScripts, type VerifyAnswer, type VerifyJob } from './verifyworker
 export type VerifyResult = 'ok' | 'refused' | 'error'
 
 /**
+ * Where a verification ran: a worker, inline on the engine's thread, or not
+ * here at all because the overlay bridge on this machine already ran it
+ * (a trusted marker, src/bridgetrust.ts).
+ */
+export type VerifyPath = 'worker' | 'inline' | 'bridge'
+
+/**
  * The default pool: two workers, or one on a two-core machine, none on one.
  * Measured, more do not help: with scripts off the engine's thread, what is
  * left on it (BEEF parsing, the database client, HTTP) costs about as much
@@ -65,14 +72,50 @@ export class VerifyPool {
    * in seconds (queueing in the pool included) and where it ran. A pool of
    * size 0 runs the same interpreter inline, on the calling thread.
    */
-  onVerified: ((seconds: number, result: VerifyResult, path: 'worker' | 'inline') => void) | undefined
+  onVerified: ((seconds: number, result: VerifyResult, path: VerifyPath) => void) | undefined
+
+  /** Verifications skipped because the bridge had run them. */
+  skipped = 0
+
+  /**
+   * Transactions whose scripts the bridge verified, by txid, counted by the
+   * submissions in flight that carry them. A txid commits to the
+   * transaction's unlocking scripts and to every source txid, and so to every
+   * locking script and amount its scripts are checked against: a verdict
+   * about a txid holds for any submission carrying that txid.
+   */
+  private readonly trusted = new Map<string, number>()
 
   get path(): 'worker' | 'inline' {
     return this.size > 0 ? 'worker' : 'inline'
   }
 
-  private observe(start: bigint, result: VerifyResult): void {
-    this.onVerified?.(Number(process.hrtime.bigint() - start) / 1e9, result, this.path)
+  private observe(start: bigint, result: VerifyResult, path: VerifyPath = this.path): void {
+    this.onVerified?.(Number(process.hrtime.bigint() - start) / 1e9, result, path)
+  }
+
+  /**
+   * Skip script verification for these txids until the returned release is
+   * called. Call it around ONE submission whose marker was accepted, and
+   * release in a finally.
+   */
+  trust(txids: readonly string[]): () => void {
+    for (const id of txids) this.trusted.set(id, (this.trusted.get(id) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      for (const id of txids) {
+        const n = (this.trusted.get(id) ?? 1) - 1
+        if (n <= 0) this.trusted.delete(id)
+        else this.trusted.set(id, n)
+      }
+    }
+  }
+
+  /** Txids currently trusted (for tests and a gauge). */
+  get trustedCount(): number {
+    return this.trusted.size
   }
 
   constructor(readonly size: number) {
@@ -115,6 +158,11 @@ export class VerifyPool {
   /** Verifies every input script of a transaction whose inputs carry their sources. */
   run(params: BdkVerifyScriptsParams): Promise<boolean> {
     const start = process.hrtime.bigint()
+    if (this.trusted.size > 0 && this.trusted.has(params.tx.id('hex'))) {
+      this.skipped++
+      this.observe(start, 'ok', 'bridge')
+      return Promise.resolve(true)
+    }
     let job: VerifyJob
     try {
       job = this.job(params)

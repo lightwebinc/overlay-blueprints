@@ -4,6 +4,8 @@ import type { ChainTracker, STEAK } from '@bsv/sdk'
 import type { Metrics } from './metrics.js'
 import { ingestProof, ProofResults } from './proofs.js'
 import type { ModuleRoutes } from './modules.js'
+import { Beef } from '@bsv/sdk'
+import { MARKER_HEADER, MarkerResults, type BridgeTrust } from './bridgetrust.js'
 
 export interface HttpDeps {
   readonly engine: Engine
@@ -20,6 +22,24 @@ export interface HttpDeps {
   readonly routes?: ModuleRoutes
   /** A tracker that never answers from a cache, for re-checking a stored proof. */
   readonly freshTracker?: ChainTracker
+  /** Judges the bridge's SPV marker; absent = never trusted. */
+  readonly bridgeTrust?: BridgeTrust
+  /** Skips script verification for these txids until released (VerifyPool.trust). */
+  readonly trustTxids?: (txids: readonly string[]) => () => void
+}
+
+/**
+ * The txids to trust for a submission whose marker was accepted: every
+ * transaction in the object, because the bridge verified every unproven one
+ * (pkg/spv verifies all of them, not only the subject). Undefined when the
+ * object does not parse here: it is then verified, and refused, as usual.
+ */
+function markedTxids(body: Buffer): string[] | undefined {
+  try {
+    return Beef.fromBinary([...body]).txs.map((t) => t.txid)
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -130,6 +150,9 @@ export function buildServer(d: HttpDeps): Server {
   // Preset so an alert on unverified or error proofs matches a series that
   // exists before the first one arrives.
   for (const result of ProofResults) d.metrics.preset('overlay_host_proof_ingests_total', { result })
+  if (d.bridgeTrust !== undefined) {
+    for (const result of MarkerResults) d.metrics.preset('overlay_host_bridge_marker_total', { result })
+  }
   d.metrics.preset('overlay_host_gasp_served_total', { result: 'ok' })
   d.metrics.preset('overlay_host_gasp_served_total', { result: 'error' })
   d.metrics.preset('overlay_host_lookups_total', { result: 'ok' })
@@ -209,6 +232,18 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
       json(res, 400, { error: 'missing or empty BEEF body' })
       return
     }
+    let release: (() => void) | undefined
+    const mark = req.headers[MARKER_HEADER]
+    if (typeof mark === 'string' && d.bridgeTrust !== undefined) {
+      const result = d.bridgeTrust.check(req.socket.remoteAddress, mark, body)
+      d.metrics.inc('overlay_host_bridge_marker_total', { result })
+      if (result === 'accepted' && d.trustTxids !== undefined) {
+        const txids = markedTxids(body)
+        if (txids !== undefined) release = d.trustTxids(txids)
+      } else if (result !== 'accepted') {
+        d.log('bridge marker ignored; verifying in full', { result, remote: req.socket.remoteAddress })
+      }
+    }
     try {
       const steak = await submitBEEF(d, [...body], topics)
       // Answer the BARE map, as the released TypeScript engine does. A client
@@ -217,6 +252,8 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
     } catch (err) {
       d.log('submit failed', { err: String(err) })
       json(res, 400, { error: String((err as Error).message) })
+    } finally {
+      release?.()
     }
     return
   }

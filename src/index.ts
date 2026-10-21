@@ -23,6 +23,7 @@ import { loadModules, mountModules, ModuleRoutes, type ModuleHost } from './modu
 import { unspentOutputs } from './restore.js'
 import { KnexProofIndex, watchReorgs, type ReorgEvent } from './reorg.js'
 import { VerifyPool, defaultWorkers } from './verifypool.js'
+import { BridgeTrust, loadKey } from './bridgetrust.js'
 
 /** Script verification buckets, 0.1 ms to 100 ms: the target is under 1 ms. */
 const VERIFY_BUCKETS = [0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1]
@@ -77,6 +78,12 @@ async function main(): Promise<void> {
   const pool = new VerifyPool(workers)
   pool.install()
   log('script verification', { workers: workers === 0 ? 'inline' : workers })
+  // The bridge's SPV marker (src/bridgetrust.ts). A key that cannot be read
+  // stops the host here rather than running with trust silently off.
+  const bridgeTrust = new BridgeTrust(
+    cfg.trustBridgeVerify && cfg.bridgeMarkerKeyFile !== undefined ? loadKey(cfg.bridgeMarkerKeyFile) : undefined,
+  )
+  log('bridge SPV marker', { trusted: bridgeTrust.enabled })
 
   // Created before the modules load, because a module presets and counts
   // through it from its factory onwards, and a second registry would be a
@@ -250,6 +257,14 @@ async function main(): Promise<void> {
   for (const result of ['ok', 'refused', 'error']) {
     metrics.histogram('overlay_host_verify_duration_seconds', { path: pool.path, result }, VERIFY_BUCKETS)
   }
+  // path="bridge": a verification this host SKIPPED because the bridge ran it
+  // (its duration is the skip's own cost). Read these as skips, not as the
+  // engine's verify latency; the bridge's own latency is
+  // overlay_bridge_verify_duration_seconds.
+  if (bridgeTrust.enabled) {
+    metrics.histogram('overlay_host_verify_duration_seconds', { path: 'bridge', result: 'ok' }, VERIFY_BUCKETS)
+  }
+  metrics.counter('overlay_host_verify_skipped_total', () => pool.skipped)
   metrics.preset('overlay_host_verify_refused_total', { path: pool.path })
   pool.onVerified = (seconds, result, path) => {
     metrics.observe('overlay_host_verify_duration_seconds', { path, result }, seconds)
@@ -289,6 +304,8 @@ async function main(): Promise<void> {
     log,
     routes,
     freshTracker: chainTracker.fresh,
+    bridgeTrust,
+    trustTxids: (txids) => pool.trust(txids),
   }
   const server = buildServer(httpDeps)
   server.listen(cfg.port, cfg.listen, () => {

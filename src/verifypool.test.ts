@@ -77,3 +77,32 @@ test('every verification is timed, worker and inline, by result', async () => {
     assert.equal(pool.refused, 1)
   }
 })
+
+test('a trusted txid skips script verification, and only while trusted', async () => {
+  const k = PrivateKey.fromRandom()
+  // Signed by the wrong key: the scripts FAIL, so a pass proves the skip.
+  const bad = await spend(k, PrivateKey.fromRandom())
+  const txid = Transaction.fromBEEF(bad.beef).id('hex')
+  const pool = new VerifyPool(0)
+  const seen: string[] = []
+  pool.onVerified = (_s, r, p) => seen.push(`${r}/${p}`)
+  pool.install()
+  try {
+    const release = pool.trust([txid])
+    assert.equal(await verdict(bad.beef, bad.tracker), true, 'trusted: scripts skipped')
+    release()
+    release() // idempotent
+    assert.equal(await verdict(bad.beef, bad.tracker), false, 'released: verified again')
+    assert.equal(pool.trustedCount, 0)
+    // Merkle paths are still checked under trust: a tracker that refuses
+    // every root still refuses the object.
+    const release2 = pool.trust([txid])
+    const refusing = { ...bad.tracker, isValidRootForHeight: async () => false }
+    assert.equal(await verdict(bad.beef, refusing), false, 'trust never waives a merkle path')
+    release2()
+  } finally {
+    await pool.close()
+  }
+  assert.equal(pool.skipped, 1)
+  assert.deepEqual(seen, ['ok/bridge', 'refused/inline'])
+})

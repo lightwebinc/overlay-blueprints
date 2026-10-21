@@ -20,6 +20,8 @@ never in a repository.
 | `OVERLAY_REORG_DEPTH` | `10` | Blocks below the tip whose proofs the reorg watch re-checks; `0` turns it off. See [Reorganizations](#reorganizations) |
 | `OVERLAY_REORG_POLL_SECONDS` | `30` | Seconds between reorg checks |
 | `OVERLAY_VERIFY_WORKERS` | `2` (`1` on two cores, `0` on one) | Worker threads that verify scripts off the engine's thread; `0` verifies inline. See [scaling](scaling.md) |
+| `OVERLAY_TRUST_BRIDGE_VERIFY` | `false` | Honour the overlay bridge's SPV marker: skip SCRIPT verification (only) for an object the bridge on this machine verified and marked. Accepted only from loopback, with a matching HMAC over the exact body; any other marker is ignored and the object verified in full. Trust boundary: overlay-bridge `docs/spv.md` and `src/bridgetrust.ts` |
+| `OVERLAY_BRIDGE_MARKER_KEY_FILE` | empty | The marker key shared with the bridge (`-verify-marker-key`): at least 32 bytes, mode 0600. Required when trust is on; an unreadable, short or group/world-readable key stops startup |
 
 A missing or malformed required value stops the process before the port opens,
 with a one-line message and exit code 2. It is not a stack trace: a

@@ -34,5 +34,7 @@ zero so an absent event still matches in `rate()`.
 | `overlay_host_verify_workers` | Gauge | none | Script verification worker threads (0: verified inline). |
 | `overlay_host_verify_in_flight` | Gauge | none | Transactions sent to the workers and not yet answered. |
 | `overlay_host_verified_in_workers_total` | Counter | none | Transactions whose scripts a worker verified. |
-| `overlay_host_verify_duration_seconds` | Histogram | `path` (`worker`, `inline`), `result` (`ok`, `refused`, `error`) | Script verification per transaction, end to end including queueing in the pool; buckets 0.1 ms to 100 ms. |
+| `overlay_host_verify_duration_seconds` | Histogram | `path` (`worker`, `inline`, `bridge`), `result` (`ok`, `refused`, `error`) | Script verification per transaction, end to end including queueing in the pool; buckets 0.1 ms to 100 ms. `path="bridge"` is a check SKIPPED because the bridge ran it (the duration is the skip's cost): read the engine's own latency with `path=~"worker\|inline"`. |
+| `overlay_host_verify_skipped_total` | Counter | none | Script checks skipped on an accepted bridge marker. |
+| `overlay_host_bridge_marker_total` | Counter | `result` (`accepted`, `disabled`, `not_loopback`, `bad_mac`) | Bridge SPV markers seen on `/submit`. Anything but `accepted` was ignored and the object verified in full. Preset at zero. |
 | `overlay_host_verify_refused_total` | Counter | `path` | Transactions whose scripts verified false. |
