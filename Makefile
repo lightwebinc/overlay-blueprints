@@ -1,4 +1,4 @@
-.PHONY: build check test clean image licences licences-update
+.PHONY: build check test clean image licences licences-update lab
 
 build:
 	npm ci && npm run build
@@ -8,6 +8,11 @@ check:
 
 test: build
 	npm test
+
+# The lab-style check: needs Docker. MODULES names a directory of module
+# checkouts whose bundles are built (see scripts/lab.mjs).
+lab: build
+	node scripts/lab.mjs $(if $(MODULES),--modules $(MODULES))
 
 image:
 	docker build -t overlay-blueprints:dev .

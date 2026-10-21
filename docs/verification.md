@@ -13,13 +13,60 @@ of both.
   manager without its topic;
 - `tm_anytx` refuses rather than throws on an object it cannot parse, because
   a throw from a topic manager is a 500, not a rejection;
-- `ls_anytx` answers a sorted formula, forgets a spent output, and rebuilds
-  its index from the engine's own storage at startup, so a restart does not
-  read as two hosts disagreeing;
+- `ls_anytx` answers a sorted formula from storage: only unspent rows on
+  carried topics, once per outpoint, ordered by the outpoint string, and a
+  page after any cursor (real outpoints, prefixes, junk, upper case) is
+  exactly the sorted keys after it;
+- a stored proof is replaced only when it no longer verifies against the
+  header source asked afresh, and the replacement verifies; a source that
+  fails replaces nothing;
+- the reorg watch demotes the admissions of a block whose root is no longer
+  the best chain's, once, and not when the source is behind, fails, or the
+  block is deeper than the watch looks;
+- scripts verified on the worker pool reach the inline verdict, valid and
+  forged alike;
+- a module route outside its own lookup names is refused;
 - `parseSyncPeers` refuses a malformed peer list, and a topic with no peers
   is `false`, which the engine skips outright;
 - every metric series is preset at zero, so an alert can match a counter that
   has not fired yet. An absent series matches nothing.
+
+With `OVERLAY_TEST_KNEX_URL` naming an empty MySQL database, `npm test` also
+checks the storage reads against the engine's own `KnexStorage`: `ls_anytx`
+against the table model for every cursor, the paged restore against
+`findUTXOsForTopic` field for field (score ties across page boundaries
+included), and the reorg watch's queries.
+
+## The lab-style check
+
+`node scripts/lab.mjs --modules <dir>` runs the host as a lab host runs it,
+with every bstack module bundle found under `<dir>` mounted beside two parity
+topics, against a throwaway MySQL and a header source it serves itself. It
+admits a load of signed objects, walks `ls_anytx`, refuses a forged
+signature, upgrades a proof, moves a block out of the chain and checks the
+demotion and the replacing proof, restarts and walks again. A probe module
+it writes itself checks what a module is handed: its routes, a submission
+through the engine, an eviction and the same object admitted afresh, the
+chain tracker, the reorg event and the shutdown listener. With all seven
+modules mounted, every check passes.
+
+## Start-up with a large store
+
+A synthetic store shaped like the lab hosts before their nightly prune: 1.39 M
+unspent outputs on three parity topics (1.16 M transactions, 1.7 GB of BEEF),
+and 150 k on a module topic. Measured on one machine, wall time from launch
+to listening and peak resident memory, with the script workers off (each
+worker adds about 80 MiB).
+
+| | v0.2.5 | this release |
+| --- | --- | --- |
+| parity topics only | 14.3 s, 1.5 GiB (18 s at a 1 GiB heap) | 1.0 s, 135 MiB (also at a 128 MiB heap) |
+| with a 150 k module topic restored as an array | does not start: the restore's array spread overflows the call stack | 10 s, 700 MiB |
+| the same through `restoreFrom` | | 10 s, 290 MiB at a 256 MiB heap |
+
+A page of `{all: true}` (1,000 outpoints, hydrated) took 4 s on v0.2.5, which
+sorted the whole index for each page, and 0.4 s here; one outpoint answers in
+about 2 ms either way.
 
 ## Against a live engine
 

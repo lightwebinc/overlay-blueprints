@@ -59,3 +59,98 @@ export class BridgeChainTracker implements ChainTracker {
     return height
   }
 }
+
+/** A tracker that can drop what it remembers about a height. */
+export interface Forgetful {
+  forget?: (height: number) => void
+}
+
+export interface CacheOptions {
+  /** How long a tip answer is reused, in milliseconds. */
+  readonly tipMs?: number
+  /** How long a root found valid is reused, in milliseconds. */
+  readonly rootMs?: number
+  /** Roots kept at most. */
+  readonly maxRoots?: number
+}
+
+/**
+ * The engine's view of a header source, with the two questions it asks on
+ * every admission answered from memory for a moment.
+ *
+ * The engine asks for the tip once per admitted topic (to stamp when it first
+ * saw a transaction) and for a root once per proven transaction in a BEEF,
+ * and against a bridge each of those was an HTTP round trip on the engine's
+ * only thread: a lab host made one tip and one root request per object it
+ * admitted. A tip reused for a second and a VALID root reused for half a
+ * minute answer the same questions with the same values, except across a
+ * block that leaves the best chain inside that half minute; the reorg watch
+ * asks `fresh`, which never reads the cache, and puts that right.
+ *
+ * Only a root that verified is kept. A root the source did not know may be
+ * known a moment later, and a refusal must not outlive that.
+ */
+export class CachedChainTracker implements ChainTracker {
+  private tip: { height: number; at: number } | undefined
+  private tipInFlight: Promise<number> | undefined
+  private readonly roots = new Map<number, { root: string; at: number }>()
+  private readonly tipMs: number
+  private readonly rootMs: number
+  private readonly maxRoots: number
+
+  /** The same source, every answer asked of it; it also corrects the cache. */
+  readonly fresh: ChainTracker
+
+  constructor(
+    private readonly inner: ChainTracker & Forgetful,
+    opts: CacheOptions = {},
+  ) {
+    this.tipMs = opts.tipMs ?? 1_000
+    this.rootMs = opts.rootMs ?? 30_000
+    this.maxRoots = opts.maxRoots ?? 10_000
+    this.fresh = {
+      isValidRootForHeight: async (root, height) => {
+        this.inner.forget?.(height)
+        const ok = await this.inner.isValidRootForHeight(root, height)
+        const hit = this.roots.get(height)
+        if (ok) this.remember(height, root)
+        else if (hit !== undefined && hit.root === root.toLowerCase()) this.roots.delete(height)
+        return ok
+      },
+      currentHeight: async () => {
+        const h = await this.inner.currentHeight()
+        this.tip = { height: h, at: Date.now() }
+        return h
+      },
+    }
+  }
+
+  private remember(height: number, root: string): void {
+    if (this.roots.size >= this.maxRoots) this.roots.clear()
+    this.roots.set(height, { root: root.toLowerCase(), at: Date.now() })
+  }
+
+  async isValidRootForHeight(root: string, height: number): Promise<boolean> {
+    const hit = this.roots.get(height)
+    if (hit !== undefined && Date.now() - hit.at < this.rootMs && hit.root === root.toLowerCase()) return true
+    const ok = await this.inner.isValidRootForHeight(root, height)
+    if (ok) this.remember(height, root)
+    return ok
+  }
+
+  async currentHeight(): Promise<number> {
+    const t = this.tip
+    if (t !== undefined && Date.now() - t.at < this.tipMs) return t.height
+    // Callers that arrive while a request is out share it.
+    this.tipInFlight ??= this.inner
+      .currentHeight()
+      .then((h) => {
+        this.tip = { height: h, at: Date.now() }
+        return h
+      })
+      .finally(() => {
+        this.tipInFlight = undefined
+      })
+    return await this.tipInFlight
+  }
+}

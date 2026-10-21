@@ -92,3 +92,66 @@ test('no proof, and a transaction this host does not hold, are both no-ops', asy
   assert.equal(await ingestProof(e, f.proven), 'unknown')
   assert.deepEqual(e.ingested, [])
 })
+
+/**
+ * The child mined at `height` (stored) and again at `height + 5` after a
+ * reorganisation; `chain` says which roots the best chain holds now.
+ */
+async function reorged() {
+  const f = await fixture()
+  const again = MerklePath.fromCoinbaseTxidAndHeight(f.txid, 800_005)
+  const tx = Transaction.fromAtomicBEEF(f.unproven)
+  tx.merklePath = again
+  const chain = new Map<number, string>([[800_005, again.computeRoot(f.txid)]])
+  const oldRoot = MerklePath.fromCoinbaseTxidAndHeight(f.txid, 800_000).computeRoot(f.txid)
+  const tracker = (withOld: boolean): ChainTracker => ({
+    isValidRootForHeight: async (root, h) => chain.get(h) === root || (withOld && h === 800_000 && root === oldRoot),
+    currentHeight: async () => 800_300,
+  })
+  return { ...f, remined: tx.toAtomicBEEF(), tracker }
+}
+
+test('a stored path whose block left the chain is replaced by one that verifies', async () => {
+  const r = await reorged()
+  const e = engine(r.tracker(false), r.proven, r.txid)
+  assert.equal(await ingestProof(e, r.remined), 'replaced')
+  assert.deepEqual(e.ingested, [r.txid])
+})
+
+test('a stored path that still verifies is kept, whatever another sender offers', async () => {
+  const r = await reorged()
+  const e = engine(r.tracker(true), r.proven, r.txid)
+  assert.equal(await ingestProof(e, r.remined), 'already')
+  assert.deepEqual(e.ingested, [])
+})
+
+test('the stored path is checked against the fresh tracker, not a cached one', async () => {
+  const r = await reorged()
+  // The engine's tracker still remembers the old block as valid; the source
+  // itself no longer has it.
+  const e = engine(r.tracker(true), r.proven, r.txid)
+  assert.equal(await ingestProof(e, r.remined, r.tracker(false)), 'replaced')
+  assert.deepEqual(e.ingested, [r.txid])
+})
+
+test('a replacement that does not verify is refused, and the stored path stays', async () => {
+  const r = await reorged()
+  const none: ChainTracker = { isValidRootForHeight: async () => false, currentHeight: async () => 800_300 }
+  const e = engine(none, r.proven, r.txid)
+  assert.equal(await ingestProof(e, r.remined), 'unverified')
+  assert.deepEqual(e.ingested, [])
+})
+
+test('a header source that fails while the stored path is checked replaces nothing', async () => {
+  const r = await reorged()
+  const flaky: ChainTracker = {
+    isValidRootForHeight: async (root, h) => {
+      if (h === 800_000) throw new Error('source down')
+      return r.tracker(false).isValidRootForHeight(root, h)
+    },
+    currentHeight: async () => 800_300,
+  }
+  const e = engine(flaky, r.proven, r.txid)
+  assert.equal(await ingestProof(e, r.remined), 'error')
+  assert.deepEqual(e.ingested, [])
+})

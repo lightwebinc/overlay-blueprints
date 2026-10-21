@@ -12,18 +12,47 @@
 import { loadConfig, ConfigError } from './config.js'
 import { openStorage } from './storage.js'
 import { chainTrackerFor } from './headersource.js'
+import { CachedChainTracker } from './chaintracker.js'
 import { buildEngine, AssertionError, countingLogger } from './engine.js'
 import { AnyTxTopicManager } from './topics/anytx.js'
-import { AnyTxLookupService } from './lookup/anytx.js'
+import { AnyTxLookupService, KnexOutpointStore } from './lookup/anytx.js'
 import { Metrics } from './metrics.js'
 import { installedVersions } from './buildinfo.js'
-import { buildServer } from './http.js'
-import { loadModules, mountModules } from './modules.js'
-import type { TopicManager, LookupService, Output } from '@lightwebinc/overlay'
+import { buildServer, submitBEEF, type HttpDeps } from './http.js'
+import { loadModules, mountModules, ModuleRoutes, type ModuleHost } from './modules.js'
+import { unspentOutputs } from './restore.js'
+import { KnexProofIndex, watchReorgs, type ReorgEvent } from './reorg.js'
+import { VerifyPool, defaultWorkers } from './verifypool.js'
+import type { Engine, TopicManager, LookupService, Output } from '@lightwebinc/overlay'
 
 function log(msg: string, extra: Record<string, unknown> = {}): void {
   const parts = Object.entries(extra).map(([k, v]) => `${k}=${String(v)}`)
   console.log([new Date().toISOString(), msg, ...parts].join(' '))
+}
+
+/** Calls each listener in turn, logging rather than throwing what one throws. */
+async function notify<A extends unknown[]>(
+  what: string,
+  listeners: ReadonlyArray<(...a: A) => void | Promise<void>>,
+  timeoutMs: number,
+  ...args: A
+): Promise<void> {
+  for (const l of listeners) {
+    let timer: NodeJS.Timeout | undefined
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => l(...args)),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, timeoutMs)
+          timer.unref()
+        }),
+      ])
+    } catch (err) {
+      log(`${what} listener failed`, { err: String(err) })
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -33,7 +62,16 @@ async function main(): Promise<void> {
   const { db, storage } = await openStorage(cfg.knexUrl)
   log('storage migrated')
 
-  const chainTracker = chainTrackerFor(cfg.chainTrackerUrl, cfg.chainNetwork)
+  // The engine asks for the tip on every admission and for a root on every
+  // proven transaction; the cache answers repeats for a moment, and `fresh`
+  // (readiness, the reorg watch, re-checking a stored proof) always asks.
+  const chainTracker = new CachedChainTracker(chainTrackerFor(cfg.chainTrackerUrl, cfg.chainNetwork))
+
+  // Script verification on worker threads, before anything can verify.
+  const workers = cfg.verifyWorkers ?? defaultWorkers()
+  const pool = workers > 0 ? new VerifyPool(workers) : undefined
+  pool?.install()
+  log('script verification', { workers: workers === 0 ? 'inline' : workers })
 
   // Created before the modules load, because a module presets and counts
   // through it from its factory onwards, and a second registry would be a
@@ -42,24 +80,65 @@ async function main(): Promise<void> {
 
   const managers: Record<string, TopicManager> = {}
   const lookupServices: Record<string, LookupService> = {}
-  const index = new AnyTxLookupService()
+  // ls_anytx reads the engine's storage at question time: there is no index
+  // to rebuild, so a host with any number of outputs starts at once.
+  const index = new AnyTxLookupService(new KnexOutpointStore(db, cfg.topics))
   for (const t of cfg.topics) {
     managers[t] = new AnyTxTopicManager()
   }
   lookupServices['ls_anytx'] = index
 
+  // What modules are handed. The engine does not exist until every module
+  // has returned its managers, so its calls are bound late and refuse until
+  // the host has started.
+  let engine: Engine | undefined
+  let httpDeps: HttpDeps | undefined
+  const routes = new ModuleRoutes()
+  const reorgListeners: Array<(e: ReorgEvent) => void | Promise<void>> = []
+  const shutdownListeners: Array<() => void | Promise<void>> = []
+  const started = (): { engine: Engine; deps: HttpDeps } => {
+    if (engine === undefined || httpDeps === undefined) throw new Error('the host has not started yet')
+    return { engine, deps: httpDeps }
+  }
+  const hostFor = (path: string): ModuleHost => ({
+    log,
+    metrics,
+    chainTracker,
+    storage,
+    engine: {
+      submit: async (beef, topics) => {
+        const { deps } = started()
+        const unknown = topics.filter((t) => !cfg.topics.includes(t))
+        if (unknown.length > 0) throw new Error(`this host does not carry: ${unknown.join(', ')}`)
+        return await submitBEEF(deps, beef, topics)
+      },
+      evict: async (txid, options = {}) => {
+        const r = await started().engine.evictAppliedTransaction(txid, options)
+        return { evictedTransactions: r.evictedTransactions, evictedOutputs: r.evictedOutputs }
+      },
+    },
+    route: routes.forModule(path),
+    onReorg: (l) => {
+      reorgListeners.push(l)
+    },
+    onShutdown: (l) => {
+      shutdownListeners.push(l)
+    },
+  })
+
   // Modules load after storage and before the engine: a module's manager
   // replaces the default on the topics it claims, so the engine must never
   // see the default there, and a module that fails to load must stop the
   // host before it admits anything under the wrong manager.
-  const loaded = await loadModules(cfg.modules, { log, metrics })
+  const loaded = await loadModules(cfg.modules, hostFor)
   const mounted = mountModules(loaded, cfg.topics, managers, lookupServices)
   for (const m of mounted) {
     log('module loaded', { path: m.path, topics: m.topics.join(','), lookups: m.lookups.join(',') })
   }
+  for (const r of routes.mount(loaded)) log('module route mounted', { path: r })
 
   const syncErrors = countingLogger()
-  const engine = buildEngine({
+  engine = buildEngine({
     managers,
     lookupServices,
     maxLookupResults: cfg.maxLookupResults,
@@ -79,35 +158,31 @@ async function main(): Promise<void> {
     log('no catch-up peers configured: /admin/startGASPSync will be a no-op')
   }
 
-  // Rebuild the lookup index from storage BEFORE the port opens. The engine
-  // holds admitted outputs durably but does not replay past admissions into a
-  // lookup service on start, so without this a restarted host answers an
-  // authoritative empty set while still holding every output, and a parity
-  // oracle reads an ordinary restart as two hosts disagreeing.
-  let restored = 0
-  for (const t of cfg.topics) {
-    restored += index.restore(await storage.findUTXOsForTopic(t))
-  }
-  log('lookup index restored from storage', { outputs: restored })
-
-  // The same for every module lookup that can rebuild itself, fed the unspent
-  // outputs of the topics that module declares. Fetched once per module, not
-  // once per lookup, and only for lookups that ask: a module whose index is
-  // durable elsewhere has nothing to restore.
+  // Every module lookup that can rebuild itself is fed the unspent outputs
+  // of the topics that module declares, each with its BEEF (a module may read
+  // what a stored transaction spent, and not only what its script says),
+  // read a page at a time. A lookup with `restoreFrom` takes them one at a
+  // time; one with only `restore` takes an array, whose BEEF stay bytes
+  // until read. The real storage object goes through: a restore that must
+  // know who spent an output the unspent rows do not carry asks it directly.
   for (const { path, module } of loaded) {
-    const restorable = Object.entries(module.lookups ?? {}).filter(([, ls]) => typeof ls.restore === 'function')
+    const restorable = Object.entries(module.lookups ?? {}).filter(
+      ([, ls]) => typeof ls.restoreFrom === 'function' || typeof ls.restore === 'function',
+    )
     if (restorable.length === 0) continue
-    const outputs: Output[] = []
-    for (const t of Object.keys(module.topics ?? {})) {
-      // With each row's BEEF: a module may read what a stored transaction
-      // spent (a sweep whose spent outputs this host never held) and not
-      // only what its script says.
-      outputs.push(...(await storage.findUTXOsForTopic(t, undefined, undefined, true)))
-    }
+    const topics = Object.keys(module.topics ?? {})
+    let array: Output[] | undefined
     for (const [name, ls] of restorable) {
-      // The real storage object goes through: a restore that must know who
-      // spent an output the unspent rows do not carry asks it directly.
-      const n = (await ls.restore?.(outputs, storage)) ?? 0
+      let n: number
+      if (typeof ls.restoreFrom === 'function') {
+        n = await ls.restoreFrom(unspentOutputs(db, topics, { includeBEEF: true }), storage)
+      } else {
+        if (array === undefined) {
+          array = []
+          for await (const o of unspentOutputs(db, topics, { includeBEEF: true, lazyBEEF: true })) array.push(o)
+        }
+        n = (await ls.restore?.(array, storage)) ?? 0
+      }
       log('module lookup restored from storage', { path, lookup: name, outputs: n })
     }
   }
@@ -120,7 +195,7 @@ async function main(): Promise<void> {
   const probe = async (): Promise<void> => {
     try {
       await db.raw('select 1')
-      await chainTracker.currentHeight()
+      await chainTracker.fresh.currentHeight()
       lastReady = true
     } catch (err) {
       if (lastReady) log('readiness lost', { err: String(err) })
@@ -153,10 +228,42 @@ async function main(): Promise<void> {
   }
 
   metrics.info('overlay_host_build_info', installedVersions())
+  // Counted by a query, so refreshed in the background rather than on scrape.
+  const recount = (): void => {
+    index.refreshSize().catch((err: unknown) => log('outpoint count failed', { err: String(err) }))
+  }
+  recount()
+  const recountTimer = setInterval(recount, 60_000)
+  recountTimer.unref()
   metrics.gauge('overlay_host_indexed_outputs', () => index.size)
   metrics.gauge('overlay_host_ready', () => (lastReady ? 1 : 0))
+  metrics.gauge('overlay_host_verify_workers', () => pool?.size ?? 0)
+  metrics.gauge('overlay_host_verify_in_flight', () => pool?.inFlight ?? 0)
+  metrics.gauge('overlay_host_verified_in_workers_total', () => pool?.verified ?? 0)
 
-  const server = buildServer({
+  // The reorg watch: blocks this host holds proofs in that left the best
+  // chain demote those admissions and are told to the modules.
+  metrics.preset('overlay_host_reorg_blocks_total')
+  metrics.preset('overlay_host_reorg_demoted_total')
+  const stopWatch = watchReorgs(
+    {
+      proofs: new KnexProofIndex(db),
+      storage,
+      fresh: chainTracker.fresh,
+      topics: cfg.topics,
+      depth: cfg.reorgDepth,
+      log,
+      onReorg: async (e) => {
+        metrics.inc('overlay_host_reorg_blocks_total', {}, e.disconnected.length)
+        metrics.inc('overlay_host_reorg_demoted_total', {}, e.demoted.length)
+        await notify('reorg', reorgListeners, 30_000, e)
+      },
+    },
+    cfg.reorgPollSeconds * 1000,
+  )
+  log('reorg watch', { depth: cfg.reorgDepth, everySeconds: cfg.reorgPollSeconds })
+
+  httpDeps = {
     engine,
     metrics,
     adminToken: cfg.adminToken,
@@ -165,18 +272,32 @@ async function main(): Promise<void> {
     syncErrors,
     ready,
     log,
-  })
+    routes,
+    freshTracker: chainTracker.fresh,
+  }
+  const server = buildServer(httpDeps)
   server.listen(cfg.port, cfg.listen, () => {
     log('listening', { addr: `${cfg.listen}:${cfg.port}`, ready: lastReady })
   })
 
+  let stopping = false
   const stop = (signal: string): void => {
+    if (stopping) return
+    stopping = true
     log('stopping', { signal })
-    server.close(() => {
-      void db.destroy().then(() => process.exit(0))
+    // Do not wait for ever on a module or a connection that will not finish.
+    setTimeout(() => process.exit(0), 15_000).unref()
+    stopWatch()
+    clearInterval(probeTimer)
+    clearInterval(recountTimer)
+    void notify('shutdown', shutdownListeners, 5_000).then(() => {
+      server.close(() => {
+        // A query still in flight is aborted by the destroy, and that is not
+        // a reason to keep the process up.
+        void Promise.allSettled([db.destroy(), pool?.close()]).then(() => process.exit(0))
+      })
+      server.closeIdleConnections()
     })
-    // Do not wait for ever on a connection that will not close.
-    setTimeout(() => process.exit(0), 10_000).unref()
   }
   process.on('SIGTERM', () => stop('SIGTERM'))
   process.on('SIGINT', () => stop('SIGINT'))

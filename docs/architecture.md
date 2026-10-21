@@ -26,14 +26,18 @@ carries no application of its own. Applications are modules it loads.
 
 | File | Role |
 | --- | --- |
-| `src/index.ts` | startup: configuration, storage migrations, module loading, lookup index restore, then the port opens |
+| `src/index.ts` | startup: configuration, storage migrations, module loading, module restores, then the port opens |
 | `src/config.ts` | every setting from the environment; a bad value exits with code 2 before the port opens |
 | `src/engine.ts` | assembles the engine with no advertiser and empty SHIP/SLAP tracker lists |
 | `src/storage.ts` | the engine's own `KnexStorage` on MySQL |
 | `src/chaintracker.ts`, `src/headersource.ts` | the chain tracker: a bridge's header API, WhatsOnChain (`woc:main`, `woc:test`) or chaintracks; third-party headers are checked for proof of work |
-| `src/proofs.ts` | upgrades a stored unproven transaction when it is resubmitted with a merkle path that verifies against this host's headers |
-| `src/modules.ts` | loads `OVERLAY_MODULES` and enforces the module rules |
-| `src/topics/anytx.ts`, `src/lookup/anytx.ts` | `tm_anytx` and `ls_anytx`: the default, application-free pair that admits every output and answers by outpoint |
+| `src/proofs.ts` | upgrades a stored unproven transaction, or replaces a stored path that no longer verifies, when it is resubmitted with a merkle path that verifies against this host's headers |
+| `src/reorg.ts` | the reorg watch: demotes admissions whose block left the best chain and tells the modules |
+| `src/restore.ts` | reads a topic's unspent outputs a page at a time for module restores |
+| `src/verifypool.ts`, `src/verifyworker.ts` | script verification on worker threads, through the SDK's backend seam (see [scaling](scaling.md)) |
+| `src/chaintracker.ts` | also the short-lived tip and root cache in front of every header source |
+| `src/modules.ts` | loads `OVERLAY_MODULES`, enforces the module rules, and defines what a module is handed (engine calls, routes, reorg and shutdown listeners) |
+| `src/topics/anytx.ts`, `src/lookup/anytx.ts` | `tm_anytx` and `ls_anytx`: the default, application-free pair that admits every output and answers by outpoint, read from storage |
 | `src/metrics.ts`, `src/buildinfo.ts` | Prometheus text on `/metrics`, with every series preset at zero |
 
 ## Request flow
@@ -59,7 +63,8 @@ carries no application of its own. Applications are modules it loads.
 
 ## Engine fork
 
-The engine is `@bsv/overlay` 2.3.1 with one additive change, an
-`onTopicFailed` hook, so the host can tell a failed topic from an empty one.
+The engine is `@bsv/overlay` 2.3.1 with two additive changes: an
+`onTopicFailed` hook, so the host can tell a failed topic from an empty one,
+and Atomic BEEF built once per transaction.
 It is carried as a tarball in `vendor/overlay-fork/`; see
 [FORK.md](../vendor/overlay-fork/FORK.md).

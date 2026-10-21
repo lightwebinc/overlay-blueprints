@@ -23,7 +23,7 @@ loaded at startup (`OVERLAY_MODULES`), and their images build on this one.
 
 ## What it is
 
-The released `@bsv/overlay` engine (2.3.1, carried as a one-change fork: see
+The released `@bsv/overlay` engine (2.3.1, carried as a small fork: see
 [FORK.md](vendor/overlay-fork/FORK.md)), assembled as a library, with:
 
 - **no advertiser**, so the engine admits and indexes and never propagates.
@@ -50,12 +50,13 @@ what belongs in its topic. Applications are separate repositories that load into
 
 | Route | |
 | --- | --- |
-| `POST /submit` | BRC-22, at the ROOT, octet-stream body, `x-topics` in either wire form. Answers a bare STEAK. A transaction the host already holds unproven, resubmitted with its merkle path, has that path verified against this host's own headers and ingested (`overlay_host_proof_ingests_total{result}`) |
+| `POST /submit` | BRC-22, at the ROOT, octet-stream body, `x-topics` in either wire form. Answers a bare STEAK. A transaction the host already holds, resubmitted with a merkle path, has that path verified against this host's own headers and ingested when the host held it unproven, or held a path whose block has since left the best chain (`overlay_host_proof_ingests_total{result}`) |
 | `POST /lookup` | BRC-24 |
 | `POST /admin/startGASPSync` | catch-up from explicitly configured peers, behind a bearer token. A no-op, reported as such, on a host with no peers configured |
 | `POST /requestSyncResponse` `POST /requestForeignGASPNode` | the peer side of catch-up, so another host can sync from this one |
 | `GET /healthz` `GET /readyz` | liveness, and readiness gated on storage and the chain tracker |
 | `GET /metrics` | Prometheus text. The engine exposes none, so everything here is counted by the host |
+| `/<lookup>/<name>` | routes a module mounts under its own lookup names (for example a terms document or a `watch` stream) |
 
 ## Configuration
 
@@ -97,7 +98,8 @@ From source (Node 24): `npm ci && npm run build && npm start`. More in
 | [docs/examples.md](docs/examples.md) | running, submitting, looking up, catch-up, building an application image |
 | [docs/references/prometheusMetrics.md](docs/references/prometheusMetrics.md) | every `overlay_host_*` series, its labels and meaning |
 | [docs/verification.md](docs/verification.md) | what the tests and live runs establish, and their limits |
-| [vendor/overlay-fork/FORK.md](vendor/overlay-fork/FORK.md) | the one change made to the overlay engine |
+| [docs/scaling.md](docs/scaling.md) | where admission time goes, script verification on worker threads, the next step |
+| [vendor/overlay-fork/FORK.md](vendor/overlay-fork/FORK.md) | the changes made to the overlay engine |
 
 Releases and notes live on [GitHub Releases](https://github.com/lightwebinc/overlay-blueprints/releases); there is no CHANGELOG.
 

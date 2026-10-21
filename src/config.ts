@@ -68,6 +68,19 @@ export interface Config {
    * contract and docs/configuration.md for the operator's view.
    */
   readonly modules: readonly string[]
+  /**
+   * Blocks below the tip whose proofs the reorg watch re-checks; 0 turns the
+   * watch off. See src/reorg.ts.
+   */
+  readonly reorgDepth: number
+  /** Seconds between reorg checks. */
+  readonly reorgPollSeconds: number
+  /**
+   * Worker threads that verify scripts off the engine's thread; 0 verifies
+   * inline as the engine does by itself. Unset, two (one on a two-core
+   * machine, none on one). See src/verifypool.ts.
+   */
+  readonly verifyWorkers: number | undefined
 }
 
 class ConfigError extends Error {}
@@ -191,6 +204,17 @@ export function parseModules(raw: string): string[] {
   return out
 }
 
+/** A non-negative integer setting, or the fallback when unset. */
+function count(name: string, fallback: number | undefined, max: number): number | undefined {
+  const v = optional(name, '')
+  if (v === '') return fallback
+  const n = Number(v)
+  if (!Number.isSafeInteger(n) || n < 0 || n > max) {
+    throw new ConfigError(`${name} ${v} is not an integer from 0 to ${max}`)
+  }
+  return n
+}
+
 export function loadConfig(): Config {
   const topics = optional('OVERLAY_TOPICS', '')
     .split(',')
@@ -215,6 +239,9 @@ export function loadConfig(): Config {
     logTime: optional('OVERLAY_LOG_TIME', 'false') === 'true',
     maxLookupResults: parseMaxLookupResults(optional('OVERLAY_MAX_LOOKUP_RESULTS', '')),
     modules: parseModules(optional('OVERLAY_MODULES', '')),
+    reorgDepth: count('OVERLAY_REORG_DEPTH', 10, 1000) as number,
+    reorgPollSeconds: Math.max(1, count('OVERLAY_REORG_POLL_SECONDS', 30, 86400) as number),
+    verifyWorkers: count('OVERLAY_VERIFY_WORKERS', undefined, 256),
   }
 }
 

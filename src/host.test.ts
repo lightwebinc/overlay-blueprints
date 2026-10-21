@@ -1,13 +1,14 @@
 /**
  * Unit tests: the parts that can be decided without a database.
  *
- * Header parsing, the startup assertions, the lookup index's own behaviour
- * including its restore path, the topic manager's refusal contract, the sync
- * peer parser and metric presetting. No engine is constructed here, no storage
+ * Header parsing, the startup assertions, ls_anytx's answers over a table
+ * that models the engine's outputs (storage.test.ts checks the model against
+ * MySQL), the topic manager's refusal contract, the sync peer parser and
+ * metric presetting. No engine is constructed here, no storage
  * is opened and no HTTP server is built.
  *
  * The engine, the storage layer and the HTTP surface are exercised LIVE
- * against MySQL and recorded in docs/proof.md. That split is deliberate: what
+ * against MySQL and recorded in docs/verification.md. That split is deliberate: what
  * those need is a real database and a real chain tracker, and a test that
  * faked either would prove the fake.
  */
@@ -16,7 +17,8 @@ import assert from 'node:assert/strict'
 import { parseSyncPeers, ConfigError, loadConfig } from './config.js'
 import { parseTopics } from './http.js'
 import { assertReady, assertNoAdvertiser, AssertionError, countingLogger } from './engine.js'
-import { AnyTxLookupService } from './lookup/anytx.js'
+import { AnyTxLookupService, hexLowerBound } from './lookup/anytx.js'
+import { TableOutpointStore, type Row } from './testutil.js'
 import { AnyTxTopicManager } from './topics/anytx.js'
 import { Metrics } from './metrics.js'
 import { installedVersions } from './buildinfo.js'
@@ -75,65 +77,99 @@ test('startup assertions fail fast on the three silent misconfigurations', () =>
   assert.doesNotThrow(() => assertNoAdvertiser(undefined))
 })
 
+const tx = (c: string): string => c.repeat(64).slice(0, 64)
+
+function anytx(rows: Row[], topics = ['tm_anytx']): AnyTxLookupService {
+  return new AnyTxLookupService(new TableOutpointStore(rows, topics))
+}
+
 test('ls_anytx answers a sorted formula, which is what makes two hosts comparable', async () => {
-  const ls = new AnyTxLookupService()
-  const script = {} as never
-  for (const [txid, i] of [['ccc', 1], ['aaa', 0], ['bbb', 2]] as Array<[string, number]>) {
-    ls.outputAdmittedByTopic({
-      mode: 'locking-script',
-      txid,
-      outputIndex: i,
-      topic: 'tm_anytx',
-      satoshis: 1,
-      lockingScript: script,
-    })
-  }
+  const ls = anytx([
+    { txid: tx('c'), outputIndex: 1, topic: 'tm_anytx', spent: false },
+    { txid: tx('a'), outputIndex: 0, topic: 'tm_anytx', spent: false },
+    { txid: tx('b'), outputIndex: 2, topic: 'tm_anytx', spent: false },
+  ])
   const all = await ls.lookup({ service: 'ls_anytx', query: { all: true } })
   assert.deepEqual(
     all.map((o) => `${o.txid}.${o.outputIndex}`),
-    ['aaa.0', 'bbb.2', 'ccc.1'],
+    [`${tx('a')}.0`, `${tx('b')}.2`, `${tx('c')}.1`],
     'the whole-index answer must be sorted, or two hosts agree as sets and differ as lists',
   )
+  assert.equal(await ls.refreshSize(), 3)
   assert.equal(ls.size, 3)
 
-  const one = await ls.lookup({ service: 'ls_anytx', query: { outpoint: 'bbb.2' } })
-  assert.deepEqual(one, [{ txid: 'bbb', outputIndex: 2 }])
+  const one = await ls.lookup({ service: 'ls_anytx', query: { outpoint: `${tx('b')}.2` } })
+  assert.deepEqual(one, [{ txid: tx('b'), outputIndex: 2 }])
 
-  const missing = await ls.lookup({ service: 'ls_anytx', query: { outpoint: 'zzz.9' } })
+  const missing = await ls.lookup({ service: 'ls_anytx', query: { outpoint: `${tx('b')}.9` } })
   assert.deepEqual(missing, [])
+  // Not as the engine writes an outpoint, so it names none: the index as
+  // a string key matched none of these either.
+  for (const q of [`${tx('b').toUpperCase()}.2`, `${tx('b')}.02`, `${tx('b')}.2e0`, 'zz.1', `${tx('b')}`]) {
+    assert.deepEqual(await ls.lookup({ service: 'ls_anytx', query: { outpoint: q } }), [], q)
+  }
 
   await assert.rejects(() => ls.lookup({ service: 'ls_anytx', query: {} }))
 })
 
-test('ls_anytx forgets a spent and an evicted output', async () => {
-  const ls = new AnyTxLookupService()
-  const script = {} as never
-  ls.outputAdmittedByTopic({ mode: 'locking-script', txid: 'a', outputIndex: 0, topic: 't', satoshis: 1, lockingScript: script })
-  ls.outputAdmittedByTopic({ mode: 'locking-script', txid: 'b', outputIndex: 0, topic: 't', satoshis: 1, lockingScript: script })
-  ls.outputSpent({ mode: 'txid', txid: 'a', outputIndex: 0, topic: 't', spendingTxid: 'x' })
-  ls.outputEvicted('b', 0)
-  assert.equal(ls.size, 0, 'an evicted output must not appear in any later answer')
+test('ls_anytx sorts by the outpoint string, so index 10 comes before index 2', async () => {
+  const ls = anytx([2, 10, 1, 0].map((i) => ({ txid: tx('a'), outputIndex: i, topic: 'tm_anytx', spent: false })))
+  const all = await ls.lookup({ service: 'ls_anytx', query: { all: true } })
+  assert.deepEqual(all.map((o) => o.outputIndex), [0, 1, 10, 2])
 })
 
-// Found by restarting a host that had admitted five objects: the engine does
-// not replay admissions into a lookup service on start, so the index came back
-// empty while the engine still held every output. A parity oracle would have
-// read that as the two hosts disagreeing.
-test('ls_anytx rebuilds its index from storage, skipping spent outputs', async () => {
-  const ls = new AnyTxLookupService()
-  const restored = ls.restore([
-    { txid: 'aa'.repeat(32), outputIndex: 0, topic: 'tm_anytx', spent: false },
-    { txid: 'bb'.repeat(32), outputIndex: 2, topic: 'tm_anytx', spent: false },
-    { txid: 'cc'.repeat(32), outputIndex: 0, topic: 'tm_anytx', spent: true },
-  ])
-  assert.equal(restored, 2)
-  assert.equal(ls.size, 2)
-
+test('ls_anytx answers only unspent rows on carried topics, once each', async () => {
+  const rows: Row[] = [
+    { txid: tx('a'), outputIndex: 0, topic: 't', spent: false },
+    { txid: tx('a'), outputIndex: 0, topic: 'u', spent: false },
+    { txid: tx('b'), outputIndex: 0, topic: 't', spent: true },
+    { txid: tx('c'), outputIndex: 0, topic: 'gone', spent: false },
+  ]
+  const ls = anytx(rows, ['t', 'u'])
   const all = await ls.lookup({ service: 'ls_anytx', query: { all: true } })
-  assert.deepEqual(all, [
-    { txid: 'aa'.repeat(32), outputIndex: 0 },
-    { txid: 'bb'.repeat(32), outputIndex: 2 },
-  ])
+  assert.deepEqual(all, [{ txid: tx('a'), outputIndex: 0 }], 'one answer per outpoint, none for a spent row or an uncarried topic')
+  assert.equal(await ls.refreshSize(), 2, 'the gauge counts rows: the outpoint is held on two topics')
+  // A spend, or a delete by eviction, is seen at the next question with no
+  // notification at all: storage is the index.
+  rows[0]!.spent = true
+  rows.splice(1, 1)
+  assert.deepEqual(await ls.lookup({ service: 'ls_anytx', query: { all: true } }), [])
+})
+
+test('hexLowerBound is the least 64-hex string not below its argument', () => {
+  assert.equal(hexLowerBound(''), '0'.repeat(64))
+  assert.equal(hexLowerBound('ab'), 'ab' + '0'.repeat(62))
+  assert.equal(hexLowerBound('ab.1'), 'ab' + '0'.repeat(62))
+  assert.equal(hexLowerBound('aB'), 'aa' + '0'.repeat(62))
+  assert.equal(hexLowerBound('a9:'), 'a9a' + '0'.repeat(61))
+  assert.equal(hexLowerBound('a9z'), 'aa' + '0'.repeat(62))
+  assert.equal(hexLowerBound('afz'), 'b' + '0'.repeat(63))
+  assert.equal(hexLowerBound('ffz'), undefined)
+  assert.equal(hexLowerBound('g'), undefined)
+  assert.equal(hexLowerBound(tx('a') + '.7'), tx('a'))
+})
+
+test('a page after any cursor is exactly the sorted keys after it', async () => {
+  // Against a plain sort and filter, the definition of the answer, over
+  // cursors of every shape: real outpoints, prefixes, junk, upper case.
+  let seed = 7
+  const rnd = (n: number): number => {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    return seed % n
+  }
+  const hex = (): string => Array.from({ length: 64 }, () => '0123456789abcdef'.charAt(rnd(3) * 7)).join('')
+  const rows: Row[] = []
+  for (let i = 0; i < 300; i++) rows.push({ txid: hex(), outputIndex: rnd(13), topic: 'tm_anytx', spent: rnd(5) === 0 })
+  const ls = anytx(rows)
+  const keys = [...new Set(rows.filter((r) => !r.spent).map((r) => `${r.txid}.${r.outputIndex}`))].sort()
+  const cursors = [...keys.slice(0, 40), ...keys.map((k) => k.slice(0, 1 + rnd(66))).slice(0, 40), '', '.', 'z', 'E', '0', '7z', '~']
+  for (const after of cursors) {
+    for (const limit of [1, 3, 50]) {
+      const want = keys.filter((k) => k > after).slice(0, limit)
+      const got = (await ls.lookup({ service: 'ls_anytx', query: { all: true, after, limit } } as never)) as Array<{ txid: string; outputIndex: number }>
+      assert.deepEqual(got.map((o) => `${o.txid}.${o.outputIndex}`), want, `after ${after} limit ${limit}`)
+    }
+  }
 })
 
 test('tm_anytx refuses rather than throws on an object it cannot parse', async () => {
@@ -184,7 +220,7 @@ test('a topic with no configured peers is false, which the engine skips outright
   const managers = { tm_a: new AnyTxTopicManager() }
   const parts = {
     managers,
-    lookupServices: { ls_anytx: new AnyTxLookupService() },
+    lookupServices: { ls_anytx: new AnyTxLookupService(new TableOutpointStore([], [])) },
     storage: {} as never,
     chainTracker: {} as never,
     topics: ['tm_a'],
@@ -321,14 +357,10 @@ test('installedVersions resolves real versions, never "unknown"', () => {
  * unevaluable on exactly the hosts it exists to compare.
  */
 test('ls_anytx pages {all:true} and the walk is stable under mid-walk admission', async () => {
-  const ls = new AnyTxLookupService()
   const key = (n: number): string => `${String(n).padStart(4, '0')}${'a'.repeat(60)}`
-  for (let i = 0; i < 2500; i++) {
-    ls.outputAdmittedByTopic({
-      mode: 'locking-script', txid: key(i), outputIndex: 0, topic: 'tm_a',
-      satoshis: 1, lockingScript: {} as never,
-    })
-  }
+  const rows: Row[] = []
+  for (let i = 0; i < 2500; i++) rows.push({ txid: key(i), outputIndex: 0, topic: 'tm_a', spent: false })
+  const ls = anytx(rows, ['tm_a'])
 
   // A bare {all:true} is BOUNDED now. That is the correction: it used to
   // return the whole index.
@@ -351,10 +383,7 @@ test('ls_anytx pages {all:true} and the walk is stable under mid-walk admission'
     // shifts every later row and the walk silently repeats one and skips one;
     // in a parity oracle that is indistinguishable from real divergence.
     if (seen.length === AnyTxLookupService.PAGE) {
-      ls.outputAdmittedByTopic({
-        mode: 'locking-script', txid: key(0) + 'z', outputIndex: 9, topic: 'tm_a',
-        satoshis: 1, lockingScript: {} as never,
-      })
+      rows.push({ txid: key(0), outputIndex: 9, topic: 'tm_a', spent: false })
     }
   }
   assert.equal(seen.length, 2500, 'the keyset walk must see every original row exactly once')

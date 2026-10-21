@@ -17,6 +17,9 @@ never in a repository.
 | `OVERLAY_MAX_LOOKUP_RESULTS` | engine default | Cap on the outputs one lookup answers. `-1` is unbounded, which a public host should not choose; anything else must be a positive integer |
 | `OVERLAY_LOG_TIME` | `false` | Engine timing logs |
 | `OVERLAY_MODULES` | empty | Comma list of absolute paths to host-side modules (compiled ES modules). Each must name topics `OVERLAY_TOPICS` already names, and its manager replaces `tm_anytx` on them. A malformed entry, a relative path, an unknown topic or a duplicate lookup name stops startup rather than being dropped. See [Modules](#modules) |
+| `OVERLAY_REORG_DEPTH` | `10` | Blocks below the tip whose proofs the reorg watch re-checks; `0` turns it off. See [Reorganizations](#reorganizations) |
+| `OVERLAY_REORG_POLL_SECONDS` | `30` | Seconds between reorg checks |
+| `OVERLAY_VERIFY_WORKERS` | `2` (`1` on two cores, `0` on one) | Worker threads that verify scripts off the engine's thread; `0` verifies inline. See [scaling](scaling.md) |
 
 A missing or malformed required value stops the process before the port opens,
 with a one-line message and exit code 2. It is not a stack trace: a
@@ -58,18 +61,37 @@ interface ModuleHost {
     preset: (name: string, labels?: Record<string, string>) => void
     gauge: (name: string, fn: () => number) => void
   }
+  chainTracker: ChainTracker            // the headers the engine verifies against
+  storage: RestoreStorage               // the engine's storage
+  engine: {
+    submit: (beef: number[], topics: readonly string[]) => Promise<STEAK>
+    evict: (txid: string, options?: { topic?: string; reason?: string }) =>
+      Promise<{ evictedTransactions: number; evictedOutputs: number }>
+  }
+  route: (path: string, handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>) => void
+  onReorg: (listener: (e: ReorgEvent) => void | Promise<void>) => void
+  onShutdown: (listener: () => void | Promise<void>) => void
 }
 
 interface RestoreStorage {
-  findOutput: (txid: string, outputIndex: number, topic?: string) => Promise<Output | null>
+  findOutput: (txid: string, outputIndex: number, topic?: string, spent?: boolean, includeBEEF?: boolean) => Promise<Output | null>
+  findOutputsForTransaction?: (txid: string, includeBEEF?: boolean) => Promise<Output[]>
+  deleteOutput?: (txid: string, outputIndex: number, topic: string) => Promise<void>
+  deleteAppliedTransaction?: (txid: string, topic: string) => Promise<void>
+}
+
+interface ReorgEvent {
+  tip: number
+  disconnected: Array<{ height: number; merkleRoot: string }>
+  demoted: Array<{ txid: string; topic: string; height: number }>
 }
 
 interface Module {
   topics?: Record<string, TopicManager>
-  lookups?: Record<
-    string,
-    LookupService & { restore?: (outputs: Output[], storage: RestoreStorage) => number | Promise<number> }
-  >
+  lookups?: Record<string, LookupService & {
+    restore?: (outputs: Output[], storage: RestoreStorage) => number | Promise<number>
+    restoreFrom?: (outputs: AsyncIterable<Output>, storage: RestoreStorage) => Promise<number>
+  }>
 }
 ```
 
@@ -85,19 +107,67 @@ with the module's path in the message:
   The engine keys both maps by name and a duplicate would silently keep the
   last value.
 - A module that mounts nothing is refused.
+- A route must be `/<lookup>/<name>` for a lookup the same module mounts,
+  and may be mounted once.
 
-A module's lookup service may offer `restore(outputs, storage)`. The engine
-does not replay past admissions into a lookup service on start, so an
-in-memory index comes back empty after every restart without it. The host
-calls it before the port opens with the unspent outputs of the topics that
-**same module** declares (`outputScript` included, so an index can be rebuilt
-by parsing each script; `outputsConsumed` too, so an output's retained
-inputs are known) and with its storage, awaits the result whether or not it
-is a promise, and logs the count it returned. `storage.findOutput` is the
-engine's own: it answers for spent outputs as well, with `spent` and
+### Restore
+
+The engine does not replay past admissions into a lookup service on start,
+so an in-memory index comes back empty after every restart unless the
+service rebuilds it. The host calls one of two methods before the port
+opens, with the unspent outputs of the topics that **same module** declares,
+in admission order, each with `outputScript`, `outputsConsumed` and its
+BEEF, and with its storage, and logs the count returned:
+
+- `restoreFrom(outputs, storage)` is handed the outputs one at a time,
+  read from storage a page at a time, so the host holds one page however
+  large the topics are. Prefer it for a topic that grows.
+- `restore(outputs, storage)` is handed every output in one array. The host
+  reads them a page at a time and keeps each BEEF as bytes until it is read,
+  but the array grows with the topics.
+
+A service with both is called through `restoreFrom`. `storage.findOutput` is
+the engine's own: it answers for spent outputs as well, with `spent` and
 `consumedBy`, so a service whose objects are retracted when an output they
 spend is spent again can rebuild that retraction rather than lose it on
-restart.
+restart. `deleteOutput` and `deleteAppliedTransaction` drop what a module no
+longer keeps without telling any lookup service; `engine.evict` does the same
+and tells every lookup service `outputEvicted`.
+
+`ls_anytx` has no restore: it answers from storage at question time, so a
+host starts in constant time and memory however many outputs it holds.
+
+### What a module may ask of the host
+
+- `chainTracker` is the host's own header source, so a module that checks a
+  proof the engine does not (an ancestor's, a payment's) needs no second
+  header configuration.
+- `engine.submit` submits a BEEF to this host's topics exactly as `POST
+  /submit` does, counted the same and with a carried proof ingested. It is
+  for a module that keeps an object refused for now (its block not yet in
+  the headers) and offers it again.
+- `engine.evict` is the engine's `evictAppliedTransaction`: the outputs of a
+  transaction on a topic (or every topic) are deleted, every lookup service
+  is told, and the record of the admission goes, so the same object offered
+  again is decided afresh.
+
+  Both work once the host has started (after every restore) and throw
+  before. Neither may be awaited inside an engine callback (a topic
+  manager's `identifyAdmissibleOutputs`, a lookup service's
+  `outputAdmittedByTopic`): the engine is part way through a submission
+  there.
+- `route(path, handler)` serves `handler` for every method at `path` and
+  below it on the host's own listener, after the host's routes. The handler
+  reads the body and owns the response, so it may stream (a `watch` stream
+  at `/ls_bchat/watch`). A route that must sit at an origin's root, such as a
+  BRC-104 handshake at `/.well-known/auth`, cannot be mounted: it still needs
+  the module's own listener.
+- `onReorg(listener)` is called after blocks this host holds proven
+  admissions in leave the best chain, and after those admissions are demoted
+  to unproven (see [Reorganizations](#reorganizations)).
+- `onShutdown(listener)` is called once when the host is asked to stop,
+  before its listener closes and its database is released; each listener is
+  awaited for at most five seconds.
 
 The host resolves the module by `import()` of its absolute path, so the
 module's own bare-specifier imports (for example `@bsv/sdk`) resolve from the
@@ -108,6 +178,37 @@ share the host's SDK copy rather than carry a second one.
 Metrics a module counts through `host.metrics` render on `/metrics` beside the
 host's own. Preset every series a module will increment, for the reason the
 host presets its own: a counter absent until its first event reads as healthy.
+
+## Proofs
+
+A transaction the host already holds, submitted again with a merkle path, has
+that path checked against this host's own headers before anything is
+written:
+
+- held unproven, the path is ingested (`result="upgraded"`);
+- held with a path that still verifies, nothing is written (`already`);
+- held with a path that no longer verifies, because its block left the best
+  chain and the transaction was mined again elsewhere, the submitted path
+  replaces it (`replaced`). The stored path is checked against the header
+  source itself, never a cached answer, so a valid stored proof is never
+  displaced.
+
+## Reorganizations
+
+The engine records the height and merkle root of every proven admission.
+Every `OVERLAY_REORG_POLL_SECONDS` the host asks its header source, afresh,
+whether each distinct height and root of the last `OVERLAY_REORG_DEPTH`
+blocks is still the best chain's. For one that is not, every admission proven
+in that block is demoted to unproven in the engine's records, the counts go
+to `overlay_host_reorg_blocks_total` and `overlay_host_reorg_demoted_total`,
+and the modules' `onReorg` listeners are told the blocks and the
+admissions. The stored BEEF keeps its old path until a new one arrives (a
+mined transaction's BEEF carries no ancestry to fall back on), and the new
+one replaces it as above.
+
+A height above the source's own tip, or a source that fails, is not read as
+a reorganization. A block deeper than `OVERLAY_REORG_DEPTH` when it left, or
+one that held none of this host's proven admissions, is not seen.
 
 ## Catch-up
 
@@ -128,6 +229,14 @@ return value says nothing about whether anything synced.
 `/readyz` gates on storage answering and the chain tracker answering,
 re-checked every ten seconds rather than cached: a host that came up healthy
 and then lost its chain tracker is not ready and should say so.
+
+## Header questions
+
+The engine asks for the tip on every admitted topic and for a root on every
+proven transaction in a BEEF. The host answers a repeated tip for one second
+and a root found valid for thirty seconds from memory; a root the source did
+not know is never remembered. Readiness, the reorg watch and the check of a
+stored proof always ask the source.
 
 ## Development
 

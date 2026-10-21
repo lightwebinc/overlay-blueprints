@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Engine } from '@lightwebinc/overlay'
+import type { ChainTracker, STEAK } from '@bsv/sdk'
 import type { Metrics } from './metrics.js'
 import { ingestProof, ProofResults } from './proofs.js'
+import type { ModuleRoutes } from './modules.js'
 
 export interface HttpDeps {
   readonly engine: Engine
@@ -14,6 +16,51 @@ export interface HttpDeps {
   readonly syncErrors?: { take: () => number }
   readonly ready: () => boolean
   readonly log: (msg: string, extra?: Record<string, unknown>) => void
+  /** Routes modules mounted under their lookup names. */
+  readonly routes?: ModuleRoutes
+  /** A tracker that never answers from a cache, for re-checking a stored proof. */
+  readonly freshTracker?: ChainTracker
+}
+
+/**
+ * One submission into the engine, counted, with the proof a duplicate carries
+ * ingested. `POST /submit` and a module's `engine.submit` both come here, so
+ * a module's resubmission is counted and treated exactly as the plane's.
+ * Throws what the engine throws.
+ */
+export async function submitBEEF(d: HttpDeps, beef: number[], topics: readonly string[]): Promise<STEAK> {
+  let steak: STEAK
+  try {
+    steak = await d.engine.submit({ beef, topics: [...topics] }, undefined, 'current-tx')
+  } catch (err) {
+    d.metrics.inc('overlay_host_submits_total', { result: 'error' })
+    throw err
+  }
+  d.metrics.inc('overlay_host_submits_total', { result: 'ok' })
+  // Two different facts, and they were one counter named for the wrong
+  // one. A submit of an object the host already holds returns 200 and
+  // admits NOTHING, so a counter incremented per requested topic on every
+  // 200 and called "admissions" reports admissions that did not happen.
+  for (const t of topics) d.metrics.inc('overlay_host_topic_submits_total', { topic: t })
+  let admitted = 0
+  for (const [t, adm] of Object.entries(steak ?? {})) {
+    const n = adm?.outputsToAdmit?.length ?? 0
+    admitted += n
+    if (n > 0) d.metrics.inc('overlay_host_admissions_total', { topic: t }, n)
+  }
+  // A submission that admitted nothing may be a transaction this host
+  // already holds, now arriving with the proof it lacked, or with a new one
+  // after its block left the best chain. The engine drops that proof as part
+  // of its duplicate answer; ingestProof keeps it, after verifying it against
+  // this host's own headers.
+  if (admitted === 0) {
+    const result = await ingestProof(d.engine, beef, d.freshTracker)
+    d.metrics.inc('overlay_host_proof_ingests_total', { result })
+    if (result === 'upgraded' || result === 'replaced' || result === 'unverified' || result === 'error') {
+      d.log('proof on duplicate submission', { result, topics: topics.join(',') })
+    }
+  }
+  return steak
 }
 
 const MAX_BODY = 64 * 1024 * 1024 // matches the bridge's object ceiling
@@ -163,35 +210,11 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
       return
     }
     try {
-      const steak = await d.engine.submit({ beef: [...body], topics }, undefined, 'current-tx')
-      d.metrics.inc('overlay_host_submits_total', { result: 'ok' })
-      // Two different facts, and they were one counter named for the wrong
-      // one. A submit of an object the host already holds returns 200 and
-      // admits NOTHING, so a counter incremented per requested topic on every
-      // 200 and called "admissions" reports admissions that did not happen.
-      for (const t of topics) d.metrics.inc('overlay_host_topic_submits_total', { topic: t })
-      let admitted = 0
-      for (const [t, adm] of Object.entries(steak ?? {})) {
-        const n = adm?.outputsToAdmit?.length ?? 0
-        admitted += n
-        if (n > 0) d.metrics.inc('overlay_host_admissions_total', { topic: t }, n)
-      }
-      // A submission that admitted nothing may be a transaction this host
-      // already holds, now arriving with the proof it lacked. The engine
-      // drops that proof as part of its duplicate answer; ingestProof keeps
-      // it, after verifying it against this host's own headers.
-      if (admitted === 0) {
-        const result = await ingestProof(d.engine, [...body])
-        d.metrics.inc('overlay_host_proof_ingests_total', { result })
-        if (result === 'upgraded' || result === 'unverified' || result === 'error') {
-          d.log('proof on duplicate submission', { result, topics })
-        }
-      }
+      const steak = await submitBEEF(d, [...body], topics)
       // Answer the BARE map, as the released TypeScript engine does. A client
       // that worked against that engine keeps working here.
       json(res, 200, steak)
     } catch (err) {
-      d.metrics.inc('overlay_host_submits_total', { result: 'error' })
       d.log('submit failed', { err: String(err) })
       json(res, 400, { error: String((err as Error).message) })
     }
@@ -339,6 +362,13 @@ async function handle(d: HttpDeps, req: IncomingMessage, res: ServerResponse): P
       return
     }
     json(res, 404, { error: 'no such admin route' })
+    return
+  }
+
+  // ---- Routes a module mounted, each under one of its own lookup names.
+  const route = d.routes?.find(path)
+  if (route !== undefined) {
+    await route(req, res)
     return
   }
 

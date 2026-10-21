@@ -203,6 +203,11 @@ export class HeaderSourceChainTracker implements ChainTracker {
    */
   private readonly roots = new Map<number, { root: string; at: number }>()
 
+  /** Drops the remembered root at a height, so the next question asks the source. */
+  forget(height: number): void {
+    this.roots.delete(height)
+  }
+
   async isValidRootForHeight(root: string, height: number): Promise<boolean> {
     const hit = this.roots.get(height)
     if (hit !== undefined && Date.now() - hit.at < ROOT_TTL_MS) return hit.root === root.toLowerCase()

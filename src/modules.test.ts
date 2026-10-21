@@ -13,12 +13,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TopicManager, LookupService } from '@lightwebinc/overlay'
 import { parseModules, ConfigError, loadConfig } from './config.js'
-import { loadModules, mountModules, type LoadedModule, type ModuleHost } from './modules.js'
+import { loadModules, mountModules, ModuleRoutes, type LoadedModule, type ModuleHost } from './modules.js'
+import { TableOutpointStore } from './testutil.js'
 import { AnyTxTopicManager } from './topics/anytx.js'
 import { AnyTxLookupService } from './lookup/anytx.js'
 import { Metrics } from './metrics.js'
 
-const quiet: ModuleHost = { log: () => {}, metrics: new Metrics() }
+/** A host with only what these tests read; the rest is never called. */
+function host(over: Partial<ModuleHost> = {}): ModuleHost {
+  return { log: () => {}, metrics: new Metrics(), ...over } as ModuleHost
+}
+const quiet = host()
 
 function stubManager(): TopicManager {
   return {
@@ -87,7 +92,7 @@ test('OVERLAY_MODULES is empty by default and parsed when set', () => {
 
 test('mountModules refuses a module whose topic OVERLAY_TOPICS does not name', () => {
   const managers: Record<string, TopicManager> = { tm_a: new AnyTxTopicManager() }
-  const lookups: Record<string, LookupService> = { ls_anytx: new AnyTxLookupService() }
+  const lookups: Record<string, LookupService> = { ls_anytx: new AnyTxLookupService(new TableOutpointStore([], [])) }
   assert.throws(
     () => mountModules([loadedStub('/m/x.js', ['tm_zzz'], [])], ['tm_a'], managers, lookups),
     (err: unknown) =>
@@ -102,7 +107,7 @@ test('mountModules refuses a module whose topic OVERLAY_TOPICS does not name', (
 test('mountModules refuses duplicate lookups and duplicate topic claims', () => {
   const fresh = (): [Record<string, TopicManager>, Record<string, LookupService>] => [
     { tm_a: new AnyTxTopicManager(), tm_b: new AnyTxTopicManager() },
-    { ls_anytx: new AnyTxLookupService() },
+    { ls_anytx: new AnyTxLookupService(new TableOutpointStore([], [])) },
   ]
   // With the host's own service.
   let [managers, lookups] = fresh()
@@ -139,7 +144,7 @@ test('mountModules refuses duplicate lookups and duplicate topic claims', () => 
 
 test('mountModules replaces the default manager only on claimed topics', () => {
   const managers: Record<string, TopicManager> = { tm_a: new AnyTxTopicManager(), tm_b: new AnyTxTopicManager() }
-  const lookups: Record<string, LookupService> = { ls_anytx: new AnyTxLookupService() }
+  const lookups: Record<string, LookupService> = { ls_anytx: new AnyTxLookupService(new TableOutpointStore([], [])) }
   const stub = loadedStub('/m/x.js', ['tm_a'], ['ls_x'])
   const mounted = mountModules([stub], ['tm_a', 'tm_b'], managers, lookups)
   assert.equal(managers['tm_a'], stub.module.topics?.['tm_a'], 'the module manager must replace the default')
@@ -186,13 +191,13 @@ test('loadModules loads a stub module from a file and mounts it over the default
     await writeFile(path, STUB)
     const logged: string[] = []
     const metrics = new Metrics()
-    const loaded = await loadModules([path], { log: (m) => logged.push(m), metrics })
+    const loaded = await loadModules([path], host({ log: (m) => logged.push(m), metrics }))
     assert.equal(loaded.length, 1)
     assert.deepEqual(logged, ['stub module created'])
     assert.match(metrics.render(), /stub_total\{kind="x"\} 0/, 'the module counts through the host registry')
 
     const managers: Record<string, TopicManager> = { tm_stub: new AnyTxTopicManager(), tm_a: new AnyTxTopicManager() }
-    const lookups: Record<string, LookupService> = { ls_anytx: new AnyTxLookupService() }
+    const lookups: Record<string, LookupService> = { ls_anytx: new AnyTxLookupService(new TableOutpointStore([], [])) }
     mountModules(loaded, ['tm_stub', 'tm_a'], managers, lookups)
     assert.ok(!(managers['tm_stub'] instanceof AnyTxTopicManager), 'the default must be replaced')
     assert.equal(managers['tm_stub'], loaded[0]?.module.topics?.['tm_stub'])
@@ -241,6 +246,50 @@ test('loadModules refuses what is not a module, naming the path', async () => {
       () => loadModules(['relative/stub.mjs'], quiet),
       (err: unknown) => err instanceof ConfigError && /is not absolute/.test(err.message),
     )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a module routes only under its own lookups, and the longest route answers', () => {
+  const routes = new ModuleRoutes()
+  const a = routes.forModule('/m/a.js')
+  const watch = (): void => {}
+  const terms = (): void => {}
+  a('/ls_a/watch', watch)
+  a('/ls_a/terms', terms)
+  const loaded = [loadedStub('/m/a.js', [], ['ls_a']), loadedStub('/m/b.js', [], ['ls_b'])]
+  assert.deepEqual(routes.mount(loaded), ['/ls_a/watch', '/ls_a/terms'])
+  assert.equal(routes.find('/ls_a/watch'), watch)
+  assert.equal(routes.find('/ls_a/watch/more'), watch)
+  assert.equal(routes.find('/ls_a/watchx'), undefined)
+  assert.equal(routes.find('/ls_a'), undefined)
+  assert.equal(routes.find('/lookup'), undefined)
+
+  for (const [path, want] of [
+    ['/ls_b/terms', /not under a lookup this module mounts/],
+    ['/lookup', /is not \/<lookup>\/<name>/],
+    ['/ls_a/', /is not \/<lookup>\/<name>/],
+    ['/ls_a//x', /is not \/<lookup>\/<name>/],
+    ['ls_a/x', /is not \/<lookup>\/<name>/],
+    ['/ls_a/watch', /mounted twice/],
+  ] as Array<[string, RegExp]>) {
+    const r2 = new ModuleRoutes()
+    r2.forModule('/m/a.js')('/ls_a/watch', watch)
+    r2.forModule('/m/a.js')(path, terms)
+    assert.throws(() => r2.mount(loaded), (err: unknown) => err instanceof ConfigError && want.test(err.message), path)
+  }
+})
+
+test('loadModules hands each module the host made for its path', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'overlay-modules-'))
+  try {
+    const path = join(dir, 'who.mjs')
+    await writeFile(path, `export default (host) => { host.log(host.name); return { lookups: { ls_who: {
+      admissionMode: 'locking-script', spendNotificationMode: 'none', outputAdmittedByTopic() {}, lookup: async () => [] } } } }`)
+    const seen: string[] = []
+    await loadModules([path], (p) => host({ log: (m) => seen.push(m), name: p } as Partial<ModuleHost>))
+    assert.deepEqual(seen, [path])
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
