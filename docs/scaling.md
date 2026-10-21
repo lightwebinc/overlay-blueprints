@@ -72,10 +72,31 @@ The lab-style check (`node scripts/lab.mjs`) confirms that a refused
 signature is still refused with the pool on, and that every script check of
 its load went to a worker (`overlay_host_verified_in_workers_total`).
 
+## Verification latency
+
+The target for one SPV verification is under a millisecond. The engine's path
+does not meet it yet. The measurement used one transaction shape: a two-input
+P2PKH transaction whose mined parent carries a depth-20 merkle path, about
+1.3 KB of BEEF, so two signature checks and one path per verification. Each
+check was timed on its own, `Transaction.fromBEEF` plus `verify` on one
+thread, against go-sdk's `spv.Verify` on the same shape:
+
+| p50 / p99, ms | Ryzen 9 5900XT | Ryzen 5 PRO 4650G | Xeon E5-2699 v3 (2.3 GHz, no turbo) |
+| --- | --- | --- | --- |
+| `@bsv/sdk` 2.7.1, Node.js 24 | 3.85 / 7.27 | 7.72 / 13.39 | 12.78 / 24.40 |
+| go-sdk v1.7.1 | 0.34 / 0.55 | 0.45 / 0.85 | 0.87 / 1.45 |
+| One signature check, p50 (`@bsv/sdk` / go-sdk) | 1.44 / 0.14 | 2.94 / 0.19 | 4.47 / 0.34 |
+
+The gap is the signature check. Elliptic curve arithmetic in JavaScript costs
+about ten times the Go implementation's, and that matches the profile above,
+where it took about 40% of the engine thread. Worker threads spread that cost
+over more cores, but they do not shorten any one verification.
+
 ## The next step
 
 With scripts moved, the engine thread is bounded by the database client and
-BEEF parsing. Two directions, in order of risk:
+BEEF parsing. Three directions: the first two raise objects a second, the
+third shortens each verification.
 
 1. **Fewer statements per object.** `KnexStorage.insertOutput` opens a
    transaction per output to read before it inserts and then upserts the
@@ -105,3 +126,12 @@ BEEF parsing. Two directions, in order of risk:
    parity topics, and does nothing for a module's topic. It is a larger
    change than this release takes on, and is recorded here with the numbers
    it would be judged against.
+3. **Native signature checks.** The script verification backend seam can
+   take a backend that checks signatures natively (a libsecp256k1 binding,
+   or a verifier process built on go-sdk) instead of in JavaScript. Taking
+   only the signature cost out of the numbers above leaves 1.2 to 4.5 ms of
+   parsing, hashing and interpreter work, so native signatures alone miss
+   the target; the whole verification in go-sdk meets it (0.34 to 0.87 ms).
+   Either way the verdict must stay the SDK's own, so it needs a
+   differential test against the inline interpreter over valid and refused
+   objects, the same check the worker pool passed.
