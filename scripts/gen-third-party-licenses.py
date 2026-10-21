@@ -22,6 +22,7 @@ dependency that IS imported is correctly present. The npm side reads
 Usage:  gen-third-party-licenses.py <repo-dir> [--check]
         --check exits 1 if the file on disk differs from what would be written.
 """
+import json
 import os
 import subprocess
 import sys
@@ -251,12 +252,24 @@ def render(repo_name, entries, kind, has_dockerfile=False):
     return "\n".join(out).rstrip() + "\n"
 
 
+def project_name(repo):
+    """The package name without its npm scope, so the output does not depend
+    on what the checkout directory is called (a container mount or a CI
+    workspace would otherwise make --check fail on an unchanged tree)."""
+    try:
+        with open(os.path.join(repo, "package.json"), encoding="utf-8") as f:
+            name = json.load(f).get("name", "")
+    except (OSError, ValueError):
+        name = ""
+    return name.rsplit("/", 1)[-1] or os.path.basename(repo)
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     repo = os.path.abspath(sys.argv[1])
     check = "--check" in sys.argv[2:]
-    name = os.path.basename(repo)
+    name = project_name(repo)
     content = build(repo, name)
     target = os.path.join(repo, "LICENSE-THIRD-PARTY")
     if check:
