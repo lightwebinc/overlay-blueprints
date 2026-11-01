@@ -58,15 +58,15 @@ and 150 k on a module topic. Measured on one machine, wall time from launch
 to listening and peak resident memory, with the script workers off (each
 worker adds about 80 MiB).
 
-| | v0.2.5 | this release |
+| | `ls_anytx` indexed in memory, restore from one array | `ls_anytx` read from storage, restore paged |
 | --- | --- | --- |
 | parity topics only | 14.3 s, 1.5 GiB (18 s at a 1 GiB heap) | 1.0 s, 135 MiB (also at a 128 MiB heap) |
 | with a 150 k module topic restored as an array | does not start: the restore's array spread overflows the call stack | 10 s, 700 MiB |
 | the same through `restoreFrom` | | 10 s, 290 MiB at a 256 MiB heap |
 
-A page of `{all: true}` (1,000 outpoints, hydrated) took 4 s on v0.2.5, which
-sorted the whole index for each page, and 0.4 s here; one outpoint answers in
-about 2 ms either way.
+A page of `{all: true}` (1,000 outpoints, hydrated) took 4 s with the
+in-memory index, which sorted the whole index for each page, and 0.4 s read
+from storage; one outpoint answers in about 2 ms either way.
 
 ## Against a live engine
 

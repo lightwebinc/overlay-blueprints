@@ -34,8 +34,8 @@ export class Metrics {
    * Set a labelled series to 1, the Prometheus `*_build_info` idiom: the value
    * carries nothing and the LABELS are the payload.
    *
-   * It exists because of a real outage. On 2026-09-23 a sibling component ran
-   * a binary linking an older dependency than its manifest required, could not
+   * It exists because of a real outage: a sibling component ran a binary
+   * linking an older dependency than its manifest required, could not
    * parse what it was sent, and discarded 100% of it for ninety minutes.
    * Nothing on the host reported which version was actually loaded. Publishing
    * it makes that a query instead of an investigation.

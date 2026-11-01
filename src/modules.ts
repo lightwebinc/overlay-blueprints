@@ -84,7 +84,7 @@ export interface ModuleHost {
   /**
    * Serves `handler` for every method at `path` and below it, on the host's
    * own listener. `path` is `/<lookup>/<name>` for a lookup service this
-   * module mounts (`/ls_bchat/watch`), so two modules cannot collide and no
+   * module mounts (`/ls_example/watch`), so two modules cannot collide and no
    * module can shadow a host route. A path that breaks the rule stops the
    * host before its port opens. The handler reads the body itself and owns
    * the response, so it may stream.

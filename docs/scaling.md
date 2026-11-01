@@ -12,7 +12,7 @@ the BEEF (about 730 bytes, two outputs, one topic), against MySQL on the same
 machine and a header source in the bridge's native shape. Shares are of the
 engine thread's samples.
 
-| Share | Verifying inline (v0.2.5) | Scripts on two to four workers |
+| Share | Verifying inline | Scripts on two to four workers |
 | --- | --- | --- |
 | `@bsv/sdk` | 48% (elliptic curve arithmetic for the signature check alone about 40%) | 14% (BEEF parsing, hashing) |
 | Database client (knex, mysql2, socket writes, pool) | 17% | 40% |
@@ -25,12 +25,12 @@ duplicate check, a read of each spent output, and for each admitted output a
 transaction of a read, an insert and an upsert of the BEEF, then the
 applied-transaction record and the transaction record.
 
-Before this release the engine also asked the header source for the tip once
-per admitted topic and for a root once per proven transaction, each an HTTP
-round trip on the same thread (one tip and one root request per object
-against a bridge). The host now answers a repeated tip for a second and a
-valid root for thirty seconds from memory; on the measured load that took
-tip requests from one per object to about one per second.
+The engine also asks the header source for the tip once per admitted topic
+and for a root once per proven transaction, each an HTTP round trip on the
+same thread (one tip and one root request per object against a bridge,
+uncached). The host answers a repeated tip for a second and a valid root for
+thirty seconds from memory; on the measured load that took tip requests from
+one per object to about one per second.
 
 ## Worker threads for scripts
 
@@ -58,7 +58,7 @@ ratios are the result:
 
 | Workers | Objects a second | Resident memory |
 | --- | --- | --- |
-| inline (v0.2.5) | 43 to 53 | 350 MiB |
+| 0 (inline) | 43 to 53 | 350 MiB |
 | 2 | 176 | 500 MiB |
 | 4 | 112 to 118 | 700 MiB |
 | 8 | 128 | 1,070 MiB |

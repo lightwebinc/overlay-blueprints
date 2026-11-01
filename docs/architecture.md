@@ -30,12 +30,11 @@ carries no application of its own. Applications are modules it loads.
 | `src/config.ts` | every setting from the environment; a bad value exits with code 2 before the port opens |
 | `src/engine.ts` | assembles the engine with no advertiser and empty SHIP/SLAP tracker lists |
 | `src/storage.ts` | the engine's own `KnexStorage` on MySQL |
-| `src/chaintracker.ts`, `src/headersource.ts` | the chain tracker: a bridge's header API, WhatsOnChain (`woc:main`, `woc:test`) or chaintracks; third-party headers are checked for proof of work |
+| `src/chaintracker.ts`, `src/headersource.ts` | the chain tracker: a bridge's header API, WhatsOnChain (`woc:main`, `woc:test`) or chaintracks; third-party headers are checked for proof of work; a short-lived tip and root cache sits in front of every source |
 | `src/proofs.ts` | upgrades a stored unproven transaction, or replaces a stored path that no longer verifies, when it is resubmitted with a merkle path that verifies against this host's headers |
 | `src/reorg.ts` | the reorg watch: demotes admissions whose block left the best chain and tells the modules |
 | `src/restore.ts` | reads a topic's unspent outputs a page at a time for module restores |
 | `src/verifypool.ts`, `src/verifyworker.ts` | script verification on worker threads, through the SDK's backend seam (see [scaling](scaling.md)) |
-| `src/chaintracker.ts` | also the short-lived tip and root cache in front of every header source |
 | `src/modules.ts` | loads `OVERLAY_MODULES`, enforces the module rules, and defines what a module is handed (engine calls, routes, reorg and shutdown listeners) |
 | `src/topics/anytx.ts`, `src/lookup/anytx.ts` | `tm_anytx` and `ls_anytx`: the default, application-free pair that admits every output and answers by outpoint, read from storage |
 | `src/metrics.ts`, `src/buildinfo.ts` | Prometheus text on `/metrics`, with every series preset at zero |

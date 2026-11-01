@@ -21,7 +21,7 @@ COPY vendor ./vendor
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /src/dist ./dist
 
-# The licences travel with the image, not only with the source tree. Several of
+# The licenses travel with the image, not only with the source tree. Several of
 # the production dependencies are licensed on terms that require their own text
 # to be included in any copy or substantial portion of the software, and an
 # image is exactly that: three Open BSV v6 packages and the MIT ones beside

@@ -39,7 +39,7 @@ export interface EngineParts {
  * Build the engine in the plane posture: propagation OFF, by having no
  * advertiser at all.
  *
- * This is D3a route 1, and it is the clean one. The engine skips its
+ * This is the no-advertiser route, and it is the clean one. The engine skips its
  * propagation step outright when no advertiser is configured, so nothing is
  * attempted and nothing is logged. The other supported posture, an empty SLAP
  * tracker list on a stock server, reaches the propagation step, fails to

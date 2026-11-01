@@ -9,9 +9,9 @@ storage, and takes a multicast delivery fabric as its transport. Objects
 delivered by the fabric reach it as ordinary BRC-22 submissions from the
 bridge beside it, and its chain tracker is that bridge's block-header
 store, so every object it admits is verified against headers the host
-itself received. The engine is not modified and not forked, and the host's
-own propagation is switched off by holding no advertiser: the fabric is
-the propagation.
+itself received. The engine is carried as a small fork with two additive
+changes (vendor/overlay-fork/FORK.md), and the host's own propagation is
+switched off by holding no advertiser: the fabric is the propagation.
 
 This product includes software developed at Lightweb Inc. and licensed
 under the Apache License, Version 2.0 (see LICENSE).

@@ -2,9 +2,10 @@
 
 Every series is `overlay_host_*`, served at `GET /metrics` on the host's HTTP
 listener. The engine exposes no registry, so every series is counted by the
-host itself and rendered as bare Prometheus text (no `# HELP` / `# TYPE` lines,
-no runtime or process metrics). Counters with a known label set are preset at
-zero so an absent event still matches in `rate()`.
+host itself and rendered as Prometheus text with no `# HELP` lines and no
+runtime or process metrics; a `# TYPE` line precedes only the histogram and
+the counters read at scrape time. Counters with a known label set are preset
+at zero so an absent event still matches in `rate()`.
 
 ## Metric types
 
@@ -12,6 +13,7 @@ zero so an absent event still matches in `rate()`.
 |------|-------------|
 | Counter | Monotonic; only increases or resets to zero on restart. Always suffixed `_total`. |
 | Gauge | A value read at scrape time. |
+| Histogram | `_bucket{le}`, `_sum` and `_count` series per label set, created at startup so every bucket exists at zero. |
 | Info | Constant 1; the labels are the payload. |
 
 ## Metrics

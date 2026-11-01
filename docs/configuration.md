@@ -15,12 +15,12 @@ never in a repository.
 | `OVERLAY_PORT` | `8080` | Listen port |
 | `OVERLAY_SYNC_PEERS` | empty | Catch-up peers, `topic=url[,url][;topic=url]`. Empty means this host never syncs with anyone, and the admin catch-up route is then a no-op that reports itself as one. Every URL must be http or https and every topic must be one this host mounts; a malformed entry stops startup rather than being dropped |
 | `OVERLAY_MAX_LOOKUP_RESULTS` | engine default | Cap on the outputs one lookup answers. `-1` is unbounded, which a public host should not choose; anything else must be a positive integer |
-| `OVERLAY_LOG_TIME` | `false` | Engine timing logs |
+| `OVERLAY_LOG_TIME` | `false` | Accepted (`true` or anything else) but not wired: the host builds the engine with its timing logs off whatever this holds |
 | `OVERLAY_MODULES` | empty | Comma list of absolute paths to host-side modules (compiled ES modules). Each must name topics `OVERLAY_TOPICS` already names, and its manager replaces `tm_anytx` on them. A malformed entry, a relative path, an unknown topic or a duplicate lookup name stops startup rather than being dropped. See [Modules](#modules) |
 | `OVERLAY_REORG_DEPTH` | `10` | Blocks below the tip whose proofs the reorg watch re-checks; `0` turns it off. See [Reorganizations](#reorganizations) |
 | `OVERLAY_REORG_POLL_SECONDS` | `30` | Seconds between reorg checks |
 | `OVERLAY_VERIFY_WORKERS` | `2` (`1` on two cores, `0` on one) | Worker threads that verify scripts off the engine's thread; `0` verifies inline. See [scaling](scaling.md) |
-| `OVERLAY_TRUST_BRIDGE_VERIFY` | `false` | Honour the overlay bridge's SPV marker: skip SCRIPT verification (only) for an object the bridge on this machine verified and marked. Accepted only from loopback, with a matching HMAC over the exact body; any other marker is ignored and the object verified in full. Trust boundary: overlay-bridge `docs/spv.md` and `src/bridgetrust.ts` |
+| `OVERLAY_TRUST_BRIDGE_VERIFY` | `false` | Honor the overlay bridge's SPV marker: skip SCRIPT verification (only) for an object the bridge on this machine verified and marked. Accepted only from loopback, with a matching HMAC over the exact body; any other marker is ignored and the object verified in full. Trust boundary: overlay-bridge `docs/spv.md` and `src/bridgetrust.ts` |
 | `OVERLAY_BRIDGE_MARKER_KEY_FILE` | empty | The marker key shared with the bridge (`-verify-marker-key`): at least 32 bytes, mode 0600. Required when trust is on; an unreadable, short or group/world-readable key stops startup |
 
 A missing or malformed required value stops the process before the port opens,
@@ -161,7 +161,7 @@ host starts in constant time and memory however many outputs it holds.
 - `route(path, handler)` serves `handler` for every method at `path` and
   below it on the host's own listener, after the host's routes. The handler
   reads the body and owns the response, so it may stream (a `watch` stream
-  at `/ls_bchat/watch`). A route that must sit at an origin's root, such as a
+  at `/ls_example/watch`). A route that must sit at an origin's root, such as a
   BRC-104 handshake at `/.well-known/auth`, cannot be mounted: it still needs
   the module's own listener.
 - `onReorg(listener)` is called after blocks this host holds proven

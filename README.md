@@ -83,7 +83,7 @@ docker run --rm -p 8080:8080 \
   -e OVERLAY_KNEX_URL=mysql://overlay:secret@db.example:3306/overlay \
   -e OVERLAY_CHAIN_TRACKER_URL=woc:main \
   -e OVERLAY_ADMIN_TOKEN=change-me \
-  ghcr.io/lightwebinc/overlay-blueprints:0.2.3
+  ghcr.io/lightwebinc/overlay-blueprints:0.4.0
 ```
 
 From source (Node 24): `npm ci && npm run build && npm start`. More in
@@ -106,4 +106,8 @@ Releases and notes live on [GitHub Releases](https://github.com/lightwebinc/over
 ## License
 
 Apache-2.0 (see `LICENSE`). Dependencies and the attribution their licenses
-require are in `NOTICE` and `LICENSE-THIRD-PARTY`.
+require are in `NOTICE` and `LICENSE-THIRD-PARTY`. The latter is generated
+from the installed production dependency tree (`make licences-update`, which
+runs `scripts/gen-third-party-licenses.py` over `npm ls --omit=dev --all`);
+CI runs the same script with `--check` after `npm ci` and fails when the file
+is stale.
