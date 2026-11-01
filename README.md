@@ -83,7 +83,7 @@ docker run --rm -p 8080:8080 \
   -e OVERLAY_KNEX_URL=mysql://overlay:secret@db.example:3306/overlay \
   -e OVERLAY_CHAIN_TRACKER_URL=woc:main \
   -e OVERLAY_ADMIN_TOKEN=change-me \
-  ghcr.io/lightwebinc/overlay-blueprints:0.4.0
+  ghcr.io/lightwebinc/overlay-blueprints:0.2.3
 ```
 
 From source (Node 24): `npm ci && npm run build && npm start`. More in
