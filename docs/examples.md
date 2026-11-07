@@ -18,7 +18,7 @@ docker run -d --name overlay-host --network overlay -p 8080:8080 \
   -e OVERLAY_KNEX_URL=mysql://root:change-me@overlay-db:3306/overlay \
   -e OVERLAY_CHAIN_TRACKER_URL=woc:main \
   -e OVERLAY_ADMIN_TOKEN=change-me-too \
-  ghcr.io/lightwebinc/overlay-blueprints:0.2.3
+  ghcr.io/lightwebinc/overlay-blueprints:0.4.1
 ```
 
 `woc:main` reads block headers from the public WhatsOnChain API and checks
@@ -86,7 +86,7 @@ managers and lookup services (contract in
 so it shares the host's `@bsv/sdk`:
 
 ```dockerfile
-FROM ghcr.io/lightwebinc/overlay-blueprints:0.2.3
+FROM ghcr.io/lightwebinc/overlay-blueprints:0.4.1
 COPY --chown=node dist/ /app/modules/myapp/
 ENV OVERLAY_TOPICS=tm_myapp \
     OVERLAY_MODULES=/app/modules/myapp/index.js
