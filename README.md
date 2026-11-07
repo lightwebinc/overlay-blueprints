@@ -11,9 +11,12 @@
 > It is published to be built on and improved. Interfaces, formats and behavior may change
 > rapidly between releases; pin an exact version.
 
-A reference overlay services host that takes the BEEF object plane as its
-transport. It carries no application: applications are host-side modules
-loaded at startup (`OVERLAY_MODULES`), and their images build on this one.
+The TypeScript reference overlay services host, taking the BEEF object plane
+as its transport. It carries no application: applications are host-side
+modules loaded at startup (`OVERLAY_MODULES`), and their images build on this
+one. It is a host, not a design series: the bstack application patterns are
+the [Patterns](https://1bsv.net/patterns.html) papers, and each application's Go
+module runs on a Go overlay engine instead of this host.
 
 ```text
    fabric ══push══▶ overlay-bridge ──▶ POST /submit ──▶ this host

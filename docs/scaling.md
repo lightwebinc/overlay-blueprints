@@ -68,7 +68,7 @@ parsing, the database client, HTTP) costs about what the scripts did, so more
 workers wait on it and each one holds its own copy of the SDK (about 80 MiB).
 Total CPU per object stays at 15 to 20 ms; it is spread over more cores.
 
-The lab-style check (`node scripts/lab.mjs`) confirms that a refused
+The end-to-end check (`node scripts/lab.mjs`) confirms that a refused
 signature is still refused with the pool on, and that every script check of
 its load went to a worker (`overlay_host_verified_in_workers_total`).
 

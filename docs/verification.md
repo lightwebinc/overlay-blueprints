@@ -37,9 +37,9 @@ against the table model for every cursor, the paged restore against
 `findUTXOsForTopic` field for field (score ties across page boundaries
 included), and the reorg watch's queries.
 
-## The lab-style check
+## The end-to-end check
 
-`node scripts/lab.mjs --modules <dir>` runs the host as a lab host runs it,
+`node scripts/lab.mjs --modules <dir>` runs the host as a deployed host runs it,
 with every bstack module bundle found under `<dir>` mounted beside two parity
 topics, against a throwaway MySQL and a header source it serves itself. It
 admits a load of signed objects, walks `ls_anytx`, refuses a forged
@@ -52,7 +52,7 @@ modules mounted, every check passes.
 
 ## Start-up with a large store
 
-A synthetic store shaped like the lab hosts before their nightly prune: 1.39 M
+A synthetic store shaped like a long-running host before its nightly prune: 1.39 M
 unspent outputs on three parity topics (1.16 M transactions, 1.7 GB of BEEF),
 and 150 k on a module topic. Measured on one machine, wall time from launch
 to listening and peak resident memory, with the script workers off (each
