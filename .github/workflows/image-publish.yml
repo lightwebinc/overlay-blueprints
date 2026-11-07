@@ -25,6 +25,7 @@ jobs:
       # Checkout fails the run if that tag does not exist: push the git tag first.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: refs/tags/v${{ github.event.inputs.tag }}
 
       # The arm64 image runs npm ci under emulation. Every production
