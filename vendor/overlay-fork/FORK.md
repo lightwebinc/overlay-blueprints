@@ -1,28 +1,18 @@
 # Fork notice
 
-This package is a fork of **`@bsv/overlay` version 2.3.1**, taken from
-`bsv-blockchain/ts-stack` at commit `888025a82dcb85f7be9ce091d1075422339fa3cd`
-(2026-08-27). It is redistributed under the **Open BSV License Version 6**, the
-license of the original, whose full text is carried verbatim in `LICENSE.txt`
+This package is a fork of **`@bsv/overlay` version 2.8.0**, taken from
+`bsv-blockchain/ts-stack` at commit `89318cf12a5707539212fee314ded3dbd8df068f`
+(2026-11-20). It is redistributed under the **Apache License 2.0**, the license
+of the original, whose text, NOTICE and PATENTS files are carried unchanged
 inside the package tarball. Copyright in the original work remains with
 © BSV Association.
 
 ## What was modified
 
-Two changes, both in `src/Engine.ts`, applied in this order by `rebuild.sh`.
+One change, in `src/Engine.ts` (and a test in `src/__tests/Engine.test.ts`),
+applied by `rebuild.sh`.
 
-### 1. `onTopicFailed` (onTopicFailed.patch)
-
-- an exported `TopicFailureReporter` type,
-- an optional public field `Engine.onTopicFailed`,
-- a guarded call to it from the existing `catch` in `validateTopicSubmission`
-  that already populates `failedTopics`.
-
-Nothing else is altered. No wire format changes, no STEAK shape changes, no
-constructor parameter is added or moved, and an engine that never sets
-`onTopicFailed` behaves exactly as upstream.
-
-### 2. Atomic BEEF built once per transaction (atomicBEEFOnce.patch)
+### Atomic BEEF built once per transaction (atomicBEEFOnce.patch)
 
 Admission called `tx.toAtomicBEEF()` once per lookup service per admitted
 output, and again for storage compaction and spend notifications, each call
@@ -36,42 +26,34 @@ must treat it as read-only (upstream's own services only parse it). The bytes
 are identical to upstream's; only the number of times they are computed
 changes.
 
-## Why the onTopicFailed hook
+Upstream 2.8.0 still calls `tx.toAtomicBEEF()` directly at each of the three
+sites, so the patch is still needed. It is a candidate to offer upstream.
 
-`submit` catches every per-topic validation error into a local `failedTopics`
-set and still returns `{outputsToAdmit: [], coinsToRetain: []}` for that topic
-with HTTP 200. A topic that FAILED, a topic that was a DUPLICATE and a topic
-that legitimately admitted nothing are byte-identical to the caller. A host
-admitting nothing therefore looks exactly like a quiet plane, and every counter
-built on "did a submit succeed" climbs at full rate while nothing is admitted.
+## No longer modified: onTopicFailed
 
-A host that admits nothing is the outage no metric sees, and without this
-hook the only mitigation is a slow conjunction of counters rather than an
-alert on the first failure.
+Earlier forks carried an `onTopicFailed` patch. Upstream took it in 2.7.0
+(ts-stack#829) with the same shape: an optional public field
+`Engine.onTopicFailed`, a `TopicFailureReporter` type, called as
+`(topic, error, { txid, mode })` inside a guard so a throwing reporter cannot
+change admission. The host assigns the field and uses upstream's unmodified.
 
-Matching the engine's log line would need no fork and is exact today, but it
-is string matching against a message upstream is free to reword.
-
-## Why a FIELD and not a constructor parameter
-
-The constructor takes twenty positional parameters, and upstream appended
-`maxLookupResults` as the twentieth between 2.2.7 and 2.3.1. Position
-twenty-one is demonstrably where upstream's next parameter lands, so a fork
-claiming it would be silently renumbered by the rebase that adds one, and every
-positional caller would then read the wrong argument with no type error at all.
-A field costs no position and is how this engine's own tests already inject
-`logger`.
+It is a field and not a constructor parameter for the reason that held then:
+the constructor takes positional parameters and upstream appends new ones
+(`scriptVerifier` is now the twenty-first), so a field cannot be renumbered.
 
 ## Why forked by NAME and not by version suffix
 
 npm's resolver gives a forked version string no protection, measured rather
-than assumed: `2.3.1-lw1` sorts BELOW `2.3.1` and is excluded from `^2.3.1`,
-and `2.3.1+lw1` compares EQUAL to upstream with the build suffix stripped. The
+than assumed: `2.8.0-lw1` sorts BELOW `2.8.0` and is excluded from `^2.8.0`,
+and `2.8.0+lw1` compares EQUAL to upstream with the build suffix stripped. The
 package NAME is the only thing the resolver will not quietly step over, so the
 fork is `@lightwebinc/overlay` and keeps the upstream version number to say
 plainly which release it tracks.
 
-## Upstream
+## Rebuilding
 
-The defect is present unchanged at upstream HEAD (2.6.1), so this delta
-survives a rebase and is worth offering upstream.
+`rebuild.sh` fetches the pinned upstream commit, applies the patch, renames the
+package, replaces the monorepo-only `workspace:` dependencies with published
+versions (`@bsv/gasp` 1.3.11, `@bsv/sdk` 4.1.2, `@bsv/verifast` 0.3.10), and
+builds and packs in a clean Node 24 container. The host pins `@bsv/sdk` to the
+same version it builds the fork against.

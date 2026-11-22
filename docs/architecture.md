@@ -62,8 +62,9 @@ carries no application of its own. Applications are modules it loads.
 
 ## Engine fork
 
-The engine is `@bsv/overlay` 2.3.1 with two additive changes: an
-`onTopicFailed` hook, so the host can tell a failed topic from an empty one,
-and Atomic BEEF built once per transaction.
+The engine is `@bsv/overlay` 2.8.0 with one additive change: Atomic BEEF
+built once per transaction. The `onTopicFailed` hook, which lets the host tell
+a failed topic from an empty one, is upstream's own since 2.7.0 and is used
+unpatched.
 It is carried as a tarball in `vendor/overlay-fork/`; see
 [FORK.md](../vendor/overlay-fork/FORK.md).

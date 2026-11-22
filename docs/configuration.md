@@ -240,6 +240,28 @@ and a root found valid for thirty seconds from memory; a root the source did
 not know is never remembered. Readiness, the reorg watch and the check of a
 stored proof always ask the source.
 
+## Upgrading a database from 0.4.x
+
+Release 0.5.0 carries engine 2.8.0, whose migrations run at start-up. One of
+them adds unique indexes on `outputs (txid, outputIndex, topic)` and
+`applied_transactions (txid, topic)`, and it REFUSES to run, and so the host
+refuses to start, if either table already holds duplicate rows. Another adds a
+spent-by column. Before upgrading a database that has been in use, run both
+queries; each must return no rows:
+
+```sql
+SELECT txid, outputIndex, topic, COUNT(*) AS n
+  FROM outputs GROUP BY txid, outputIndex, topic HAVING COUNT(*) > 1;
+
+SELECT txid, topic, COUNT(*) AS n
+  FROM applied_transactions GROUP BY txid, topic HAVING COUNT(*) > 1;
+```
+
+If they return rows, either remove the duplicates (keep one row per key,
+for example the lowest `id`, after taking a backup), or start from an empty
+database and let the host rebuild by catch-up and resubmission. A throwaway
+lab database can simply be dropped. The engine drops nothing itself.
+
 ## Development
 
 `compose.yaml` brings up MySQL and the host together. It carries a throwaway

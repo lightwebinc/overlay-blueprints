@@ -29,7 +29,7 @@ export async function openStorage(knexUrl: string): Promise<{ db: Knex; storage:
  *
  * The deep path `@bsv/overlay/storage/knex/all-migrations.ts` does resolve:
  * the package's `exports` map carries `./storage/*` subpath patterns, checked
- * against the installed 2.3.1 rather than assumed. It is not used anyway,
+ * against the installed 2.8.0 rather than assumed. It is not used anyway,
  * because a subpath pattern is a wider promise than a package's root export
  * and the root export is the one the package's own README documents.
  */

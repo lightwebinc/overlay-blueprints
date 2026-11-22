@@ -8,7 +8,7 @@
 #
 # Usage:  ./rebuild.sh [workdir]
 set -euo pipefail
-SHA=888025a82dcb85f7be9ce091d1075422339fa3cd   # @bsv/overlay 2.3.1
+SHA=89318cf12a5707539212fee314ded3dbd8df068f   # @bsv/overlay 2.8.0
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${1:-$(mktemp -d)}"
 echo "== fetching ts-stack $SHA"
@@ -20,10 +20,8 @@ tar xzf src.tar.gz --wildcards "*/packages/overlays/overlay/*" "*/config/typescr
 ROOT="$(find . -maxdepth 1 -type d -name 'bsv-blockchain-ts-stack-*' | head -1)"
 PKG="$ROOT/packages/overlays/overlay"
 
-echo "== applying the patches, in order"
-for p in onTopicFailed.patch atomicBEEFOnce.patch; do
-	patch -p1 -d "$PKG" < "$HERE/$p"
-done
+echo "== applying the patch"
+patch -p1 -d "$PKG" < "$HERE/atomicBEEFOnce.patch"
 cp "$HERE/FORK.md" "$PKG/FORK.md"
 
 echo "== renaming, and pinning the workspace: deps that cannot resolve outside the monorepo"
@@ -31,14 +29,20 @@ python3 - "$PKG/package.json" <<'PY'
 import sys, json
 p = sys.argv[1]; d = json.load(open(p))
 d['name'] = '@lightwebinc/overlay'
-d['dependencies']['@bsv/gasp'] = '1.3.6'
-d.setdefault('devDependencies', {})['@bsv/sdk'] = '2.7.1'
+# Resolve EVERY workspace: range, in any dependency section, to a published
+# version; an unmapped one fails the build rather than shipping unresolvable.
+PIN = {'@bsv/gasp': '1.3.11', '@bsv/sdk': '4.1.2', '@bsv/verifast': '0.3.10'}
+for sec in ('dependencies', 'peerDependencies', 'devDependencies', 'optionalDependencies'):
+    for k, v in d.get(sec, {}).items():
+        if str(v).startswith('workspace:'):
+            if k not in PIN: sys.exit('unmapped workspace dependency: ' + k)
+            d[sec][k] = PIN[k]
 json.dump(d, open(p, 'w'), indent=2)
 PY
 
 echo "== building and packing in a clean container"
 docker run --rm -v "$PWD/$ROOT":/w -w /w/packages/overlays/overlay node:24-alpine \
   sh -c 'npm install --no-audit --no-fund --loglevel=error && npm run build && npm pack'
-echo "== done: $PKG/lightwebinc-overlay-2.3.1.tgz"
+echo "== done: $PKG/lightwebinc-overlay-2.8.0.tgz"
 echo "   Verify the constructor arity is UNCHANGED before shipping:"
 echo "   grep -oE 'constructor\\(.*\\) \\{' dist/cjs/src/Engine.js"

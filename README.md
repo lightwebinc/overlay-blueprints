@@ -26,7 +26,7 @@ module runs on a Go overlay engine instead of this host.
 
 ## What it is
 
-The released `@bsv/overlay` engine (2.3.1, carried as a small fork: see
+The released `@bsv/overlay` engine (2.8.0, carried as a small fork with one additive change: see
 [FORK.md](vendor/overlay-fork/FORK.md)), assembled as a library, with:
 
 - **no advertiser**, so the engine admits and indexes and never propagates.
@@ -86,7 +86,7 @@ docker run --rm -p 8080:8080 \
   -e OVERLAY_KNEX_URL=mysql://overlay:secret@db.example:3306/overlay \
   -e OVERLAY_CHAIN_TRACKER_URL=woc:main \
   -e OVERLAY_ADMIN_TOKEN=change-me \
-  ghcr.io/lightwebinc/overlay-blueprints:0.4.1
+  ghcr.io/lightwebinc/overlay-blueprints:0.5.0
 ```
 
 From source (Node 24): `npm ci && npm run build && npm start`. More in
@@ -97,7 +97,7 @@ From source (Node 24): `npm ci && npm run build && npm start`. More in
 | Document | |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | components, request flow, what the host does and does not do |
-| [docs/configuration.md](docs/configuration.md) | every environment variable, startup assertions, the module contract |
+| [docs/configuration.md](docs/configuration.md) | every environment variable, startup assertions, the module contract, upgrading a 0.4.x database |
 | [docs/examples.md](docs/examples.md) | running, submitting, looking up, catch-up, building an application image |
 | [docs/references/prometheusMetrics.md](docs/references/prometheusMetrics.md) | every `overlay_host_*` series, its labels and meaning |
 | [docs/verification.md](docs/verification.md) | what the tests and live runs establish, and their limits |
