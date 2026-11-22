@@ -24,7 +24,7 @@ COPY --from=build /src/dist ./dist
 # The licenses travel with the image, not only with the source tree. Several of
 # the production dependencies are licensed on terms that require their own text
 # to be included in any copy or substantial portion of the software, and an
-# image is exactly that: three Apache-2.0 BSV packages and the MIT ones beside
+# image is exactly that: three Apache-2.0 BSV packages (with Open BSV exceptions) and the MIT ones beside
 # them. node_modules happens to carry each package's own file; these are ours,
 # and LICENSE-THIRD-PARTY states the whole set in one place.
 COPY LICENSE NOTICE LICENSE-THIRD-PARTY /usr/share/doc/overlay-blueprints/

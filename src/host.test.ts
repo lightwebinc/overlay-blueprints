@@ -13,6 +13,7 @@
  * faked either would prove the fake.
  */
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { parseSyncPeers, ConfigError, loadConfig } from './config.js'
 import { parseTopics } from './http.js'
@@ -337,11 +338,13 @@ test('OVERLAY_MAX_LOOKUP_RESULTS is unset by default and refuses nonsense', () =
  */
 test('build_info carries installed dependency versions, not ranges', () => {
   const m = new Metrics()
-  m.info('overlay_host_build_info', { overlay: '2.8.0', sdk: '4.1.2', gasp: '1.3.11', node: '24.0.0' })
+  const v = installedVersions()
+  m.info('overlay_host_build_info', { overlay: String(v.overlay), sdk: String(v.sdk), gasp: String(v.gasp), node: String(v.node) })
   const out = m.render()
-  assert.match(out, /overlay_host_build_info\{.*overlay="2\.8\.0".*\} 1/)
+  assert.match(out, new RegExp(`overlay_host_build_info\\{.*overlay="${String(v.overlay).replaceAll('.', '\\.')}".*\\} 1`))
   // Labels render sorted, so the series identity is stable across restarts.
-  assert.match(out, /gasp="1\.3\.11",node="24\.0\.0",overlay="2\.8\.0",sdk="4\.1\.2"/)
+  const esc = (x: unknown): string => String(x).replaceAll('.', '\\.')
+  assert.match(out, new RegExp(`gasp="${esc(v.gasp)}",node="${esc(v.node)}",overlay="${esc(v.overlay)}",sdk="${esc(v.sdk)}"`))
   // A range is not a version. If this ever renders a caret the reporter is
   // reading package.json instead of what is installed.
   assert.doesNotMatch(out, /[\^~]/)
@@ -365,6 +368,10 @@ test('installedVersions resolves real versions, never "unknown"', () => {
     assert.match(String(v[pkg]), /^\d+\.\d+\.\d+/, `${pkg} is not a concrete version`)
   }
   assert.match(String(v.node), /^\d+\./)
+  // The sdk is an exact pin, so what is installed must be what the manifest
+  // says. A drift here is a lockfile or Renovate problem, caught at test time.
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { dependencies: Record<string, string> }
+  assert.equal(v.sdk, pkg.dependencies['@bsv/sdk'], 'installed @bsv/sdk differs from the exact pin')
 })
 
 /**

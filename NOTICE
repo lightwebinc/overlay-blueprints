@@ -37,9 +37,9 @@ This product includes third-party software, distributed under the terms
 of their respective licenses. Each dependency retains its own copyright;
 this notice does not modify those licenses.
 
-  @bsv/gasp                                   Apache License 2.0
-  @bsv/sdk                                    Apache License 2.0
-  @lightwebinc/overlay                        Apache License 2.0
+  @bsv/gasp                                   Apache License 2.0 (exceptions below)
+  @bsv/sdk                                    Apache License 2.0 (exceptions below)
+  @lightwebinc/overlay                        Apache License 2.0 (exceptions below)
     (a modified fork of @bsv/overlay 2.8.0; see vendor/overlay-fork/FORK.md)
   knex                                        MIT License
   mysql2                                      MIT License
@@ -50,15 +50,24 @@ in any image built here, and LICENSE-THIRD-PARTY reproduces
 every license verbatim. That file is generated from that tree rather
 than maintained by hand, and CI fails when it falls out of date.
 
-The three BSV packages are Apache-2.0, each shipping its own NOTICE and a
-PATENTS file. Each package's NOTICE is reproduced in LICENSE-THIRD-PARTY.
-The PATENTS files travel in each package inside node_modules, and so in
-every image built here; they are not reproduced in LICENSE-THIRD-PARTY.
-Some transitive dependencies of @bsv/sdk carry older Open BSV License
-text, which LICENSE-THIRD-PARTY also reproduces verbatim.
+The three BSV packages declare Apache-2.0 and each ships its own NOTICE
+and a PATENTS file. Their THIRD_PARTY_NOTICES.md files list exceptions that
+stay under other licenses: source carried over from before the 2026
+license uniformization remains under Open BSV License Version 4 (its text
+carries "Copyright (c) 2023 BSV Blockchain Association"), and @bsv/sdk's
+source-only Teranode consensus test fixtures are under Open BSV License
+Version 6 ("(c) BSV Association"). Both texts ship in each package's
+LICENSES directory and are reproduced verbatim in LICENSE-THIRD-PARTY,
+which also carries every package's NOTICE. The PATENTS files travel inside
+each package in node_modules, and so in every image built here; they are
+not reproduced in LICENSE-THIRD-PARTY.
 
-The full text of every license is reproduced verbatim in
-LICENSE-THIRD-PARTY, because each of these licenses requires its own text
-to travel with any copy or substantial portion of the software it covers.
+Two terms of the Open BSV licenses are worth stating in plain words,
+because they do not match the permissive licenses beside them: the grant
+is made on a revocable basis, and the software they cover, together with
+anything derived from it, may only be used exclusively on the BSV
+Blockchain. Those terms bind this product's use of any portion under those
+licenses. They do not extend to Lightweb Inc.'s own source, which is
+Apache-2.0 as stated above.
 
 =========================================================================

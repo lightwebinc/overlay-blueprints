@@ -29,9 +29,14 @@ python3 - "$PKG/package.json" <<'PY'
 import sys, json
 p = sys.argv[1]; d = json.load(open(p))
 d['name'] = '@lightwebinc/overlay'
-d['dependencies']['@bsv/gasp'] = '1.3.11'
-d['devDependencies']['@bsv/sdk'] = '4.1.2'
-d['devDependencies']['@bsv/verifast'] = '0.3.10'
+# Resolve EVERY workspace: range, in any dependency section, to a published
+# version; an unmapped one fails the build rather than shipping unresolvable.
+PIN = {'@bsv/gasp': '1.3.11', '@bsv/sdk': '4.1.2', '@bsv/verifast': '0.3.10'}
+for sec in ('dependencies', 'peerDependencies', 'devDependencies', 'optionalDependencies'):
+    for k, v in d.get(sec, {}).items():
+        if str(v).startswith('workspace:'):
+            if k not in PIN: sys.exit('unmapped workspace dependency: ' + k)
+            d[sec][k] = PIN[k]
 json.dump(d, open(p, 'w'), indent=2)
 PY
 
