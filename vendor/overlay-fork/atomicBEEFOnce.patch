@@ -1,7 +1,7 @@
---- a/src/Engine.ts	2026-10-20 00:05:32.382274835 -0600
-+++ b/src/Engine.ts	2026-10-20 00:05:32.414572874 -0600
-@@ -152,6 +152,18 @@
-   onTopicFailed?: TopicFailureReporter
+--- a/src/Engine.ts
++++ b/src/Engine.ts
+@@ -395,6 +395,18 @@
+   private basmFetchImpl?: typeof fetch
  
    /**
 +   * Atomic BEEF of each transaction in flight, serialized once. Admission used
@@ -19,7 +19,7 @@
     * Creates a new Overlay Services Engine
     * @param {[key: string]: TopicManager} managers - manages topic admittance
     * @param {[key: string]: LookupService} lookupServices - manages UTXO lookups
-@@ -266,8 +278,16 @@
+@@ -562,8 +574,16 @@
      }
    }
  
@@ -36,8 +36,8 @@
 +    return tx.merklePath === undefined ? originalBEEF : this.atomicBEEFOf(tx)
    }
  
-   private async recordTransactionData(tx: Transaction, beef: number[], blockHash?: string): Promise<void> {
-@@ -754,7 +774,7 @@
+   private async recordTransactionData(
+@@ -1295,7 +1315,7 @@
      if (lookupService.spendNotificationMode === 'whole-tx') {
        await lookupService.outputSpent({
          mode: 'whole-tx',
@@ -46,7 +46,7 @@
          txid: output.txid,
          outputIndex: output.outputIndex,
          topic,
-@@ -892,7 +912,7 @@
+@@ -1424,7 +1444,7 @@
      }
      await lookupService.outputAdmittedByTopic({
        mode: 'whole-tx',
@@ -55,10 +55,10 @@
        outputIndex,
        topic,
        offChainValues
---- a/src/__tests/Engine.test.ts	2026-10-20 00:05:59.686344914 -0600
-+++ b/src/__tests/Engine.test.ts	2026-10-20 00:05:59.718042022 -0600
-@@ -2010,6 +2010,33 @@
-       expect(deleteUTXODeep).not.toHaveBeenCalled()
+--- a/src/__tests/Engine.test.ts	2026-11-22 18:46:34.068592084 +0000
++++ b/src/__tests/Engine.test.ts	2026-11-22 18:46:34.070540243 +0000
+@@ -3580,6 +3580,33 @@
+       expect(mockStorageEngine.findOutput).not.toHaveBeenCalled()
      })
  
 +    it('serializes a transaction to atomic BEEF once for every whole-tx service and output', async () => {

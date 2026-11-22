@@ -3,7 +3,7 @@
  * one transaction's inputs, off the engine's thread.
  *
  * Each input's Spend is built exactly as `Transaction.verify` builds it on
- * its inline path (sdk 2.7.1, verifyTransactionInputs): the same source
+ * its inline path (sdk 4.1.2, verifyTransactionInputs): the same source
  * txid, locking script and satoshis, the transaction's own version, inputs,
  * outputs and lock time, one sighash cache shared by the transaction's
  * inputs, and no memory limit. The verdict is the interpreter's.
