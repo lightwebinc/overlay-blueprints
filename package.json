@@ -18,7 +18,7 @@
   "dependencies": {
     "@bsv/sdk": "4.1.2",
     "knex": "3.3.0",
-    "mysql2": "3.24.4",
+    "mysql2": "3.24.6",
     "@lightwebinc/overlay": "file:vendor/overlay-fork/lightwebinc-overlay-2.8.0.tgz"
   },
   "devDependencies": {
