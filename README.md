@@ -89,7 +89,7 @@ docker run --rm -p 8080:8080 \
   ghcr.io/lightwebinc/overlay-blueprints:0.5.0
 ```
 
-From source (Node 24): `npm ci && npm run build && npm start`. More in
+From source (Node 26): `npm ci && npm run build && npm start`. More in
 [docs/examples.md](docs/examples.md).
 
 ## Documentation
