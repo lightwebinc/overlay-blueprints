@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=26 <27"
   },
   "scripts": {
     "build": "tsc",
@@ -22,7 +22,7 @@
     "@lightwebinc/overlay": "file:vendor/overlay-fork/lightwebinc-overlay-2.8.0.tgz"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^26.0.0",
     "typescript": "^7.0.0"
   }
 }

@@ -27,8 +27,8 @@ jobs:
         with:
           # Pinned to the RUNTIME major, which package.json also pins. The
           # engine package is published for current Node and the host is
-          # deployed on 24; testing on anything else tests a host we do not run.
-          node-version: "24"
+          # deployed on 26; testing on anything else tests a host we do not run.
+          node-version: "26"
           cache: npm
       - run: npm ci
       - name: typecheck
