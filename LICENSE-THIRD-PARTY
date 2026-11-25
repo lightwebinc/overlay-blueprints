@@ -19,7 +19,7 @@ Contents:
    1. @bsv/gasp@1.3.11  (Apache License 2.0, Open BSV License Version 4, MIT License)
    2. @bsv/sdk@4.1.2  (Apache License 2.0, BSD License, MIT License, Open BSV License Version 4, Open BSV License Version 6, ISC License, Open BSV License Version 5)
    3. @lightwebinc/overlay@2.8.0  (Apache License 2.0, Open BSV License Version 4, MIT License)
-   4. @types/node@24.10.1  (MIT License)
+   4. @types/node@24.19.2  (MIT License)
    5. aws-ssl-profiles@1.1.2  (MIT License)
    6. colorette@2.0.19  (MIT License)
    7. commander@10.0.1  (MIT License)
@@ -41,7 +41,7 @@ Contents:
   23. long@5.3.2  (Apache License 2.0)
   24. lru.min@1.1.5  (MIT License)
   25. ms@2.1.2  (MIT License)
-  26. mysql2@3.24.4  (MIT License)
+  26. mysql2@3.24.6  (MIT License)
   27. named-placeholders@1.1.6  (MIT License)
   28. path-parse@1.0.7  (MIT License)
   29. pg-connection-string@2.6.2  (MIT License)
@@ -53,7 +53,7 @@ Contents:
   35. supports-preserve-symlinks-flag@1.0.0  (MIT License)
   36. tarn@3.1.2  (MIT License)
   37. tildify@2.0.0  (MIT License)
-  38. undici-types@7.16.0  (MIT License)
+  38. undici-types@7.24.6  (MIT License)
 
 ================================================================================
 1. @bsv/gasp@1.3.11
@@ -1392,7 +1392,7 @@ ts-stack
 Copyright 2020-2026 BSV Association
 
 ================================================================================
-4. @types/node@24.10.1
+4. @types/node@24.19.2
    MIT License
 ================================================================================
 
@@ -2151,7 +2151,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-26. mysql2@3.24.4
+26. mysql2@3.24.6
    MIT License
 ================================================================================
 
@@ -2451,7 +2451,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-38. undici-types@7.16.0
+38. undici-types@7.24.6
    MIT License
 ================================================================================
 
