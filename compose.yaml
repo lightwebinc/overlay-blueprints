@@ -3,7 +3,7 @@
 # machine, so nothing here is ever the source of a real credential.
 services:
   db:
-    image: mysql:9@sha256:1f2ca53a9e94ff9f1f313099fa7dc7fb2f72e180ca5b2ef83574031e451bbbf1
+    image: mysql:26@sha256:9092489f49fb59c4ba6c1425c6a59f71f864f24bf4339a5a26b718adc7a8b343
     environment:
       MYSQL_ROOT_PASSWORD: overlay
       MYSQL_DATABASE: overlay
